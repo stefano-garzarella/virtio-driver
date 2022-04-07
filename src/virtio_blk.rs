@@ -63,6 +63,10 @@ fn to_lba(offset: u64) -> Result<u64, Error> {
     Ok(offset / block_size)
 }
 
+pub fn validate_lba(offset: u64) -> Result<(), Error> {
+    to_lba(offset).map(|_| ())
+}
+
 #[derive(Clone, Copy, Default)]
 #[repr(C, packed)]
 #[allow(dead_code)]

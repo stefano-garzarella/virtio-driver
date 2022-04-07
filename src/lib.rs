@@ -13,7 +13,7 @@ mod virtio_blk;
 pub mod virtqueue;
 
 pub use vhost_user::VhostUser;
-pub use virtio_blk::{VirtioBlkConfig, VirtioBlkFeatureFlags, VirtioBlkQueue};
+pub use virtio_blk::{validate_lba, VirtioBlkConfig, VirtioBlkFeatureFlags, VirtioBlkQueue};
 use virtqueue::{Virtqueue, VirtqueueLayout};
 
 bitflags! {
