@@ -9,10 +9,12 @@ use vm_memory::ByteValued;
 use vmm_sys_util::eventfd::EventFd;
 
 mod vhost_user;
+mod vhost_vdpa;
 mod virtio_blk;
 pub mod virtqueue;
 
 pub use vhost_user::VhostUser;
+pub use vhost_vdpa::VhostVdpa;
 pub use virtio_blk::{validate_lba, VirtioBlkConfig, VirtioBlkFeatureFlags, VirtioBlkQueue};
 use virtqueue::{Virtqueue, VirtqueueLayout};
 
