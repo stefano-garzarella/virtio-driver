@@ -8,13 +8,19 @@ use std::rc::Rc;
 use vm_memory::ByteValued;
 use vmm_sys_util::eventfd::EventFd;
 
-mod vhost_user;
-mod vhost_vdpa;
 mod virtio_blk;
 pub mod virtqueue;
 
+#[cfg(feature = "vhost-user")]
+mod vhost_user;
+#[cfg(feature = "vhost-vdpa")]
+mod vhost_vdpa;
+
+#[cfg(feature = "vhost-user")]
 pub use vhost_user::VhostUser;
+#[cfg(feature = "vhost-vdpa")]
 pub use vhost_vdpa::VhostVdpa;
+
 pub use virtio_blk::{validate_lba, VirtioBlkConfig, VirtioBlkFeatureFlags, VirtioBlkQueue};
 use virtqueue::{Virtqueue, VirtqueueLayout};
 
