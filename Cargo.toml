@@ -5,7 +5,7 @@ authors = ["Kevin Wolf <kwolf@redhat.com>"]
 edition = "2018"
 
 [features]
-default = ["unsafe-op-in-unsafe-fn"]
+default = []
 unsafe-op-in-unsafe-fn = []
 
 [dependencies]
