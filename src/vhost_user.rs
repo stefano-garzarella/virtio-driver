@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
 use crate::VirtioTransport;
 use memfd::MemfdOptions;

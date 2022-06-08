@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
 use crate::virtqueue::{Virtqueue, VirtqueueIter, VirtqueueLayout};
 use crate::{Completion, VirtioTransport};
 use bitflags::bitflags;

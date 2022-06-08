@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
 //! A virtqueue implementation to be used internally by virtio device drivers.
 
 use bitflags::bitflags;
