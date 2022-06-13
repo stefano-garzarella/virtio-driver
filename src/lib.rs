@@ -41,9 +41,11 @@ bitflags! {
 }
 
 /// The result of a completed request.
-pub struct Completion {
-    /// The user-defined value that was passed to the corresponding request.
-    pub user_data: usize,
+///
+/// Type parameter `C` denotes the type of the "context" associated with the request.
+pub struct Completion<C> {
+    /// The user-defined "context" that was associated with the request.
+    pub context: C,
 
     /// 0 on success, a negative `errno` value on error.
     pub ret: i32,

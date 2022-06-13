@@ -6,6 +6,7 @@ use bitflags::bitflags;
 use libc::{c_void, iovec, EIO, ENOTSUP, EPROTO};
 use std::convert::TryFrom;
 use std::io::{Error, ErrorKind};
+use std::iter;
 use std::mem;
 use vm_memory::{ByteValued, Le16, Le32, Le64};
 
@@ -136,11 +137,6 @@ impl VirtioBlkReqHeader {
 
 unsafe impl ByteValued for VirtioBlkReqHeader {}
 
-#[derive(Clone)]
-struct VirtioBlkRequest {
-    user_data: usize,
-}
-
 #[derive(Clone, Copy)]
 struct VirtioBlkReqBuf {
     header: VirtioBlkReqHeader,
@@ -162,6 +158,9 @@ struct VirtioBlkReqBuf {
 /// * To be notified of new completions, use the `EventFd` returned by
 ///   [`VirtioTransport::get_completion_fd`].
 ///
+/// When a request is submitted, the user provides a "context" of type `C` that will later be
+/// returned in the completion for that request.
+///
 /// Use [`setup_queues`] to create the queues for a device.
 ///
 /// # Examples
@@ -180,7 +179,7 @@ struct VirtioBlkReqBuf {
 /// vhost.add_mem_region(mem.as_ptr() as usize, 512, mem_file.as_raw_fd(), 0).unwrap();
 ///
 /// // Submit a request
-/// queues[0].read(0, &mut mem, 1234).unwrap();
+/// queues[0].read(0, &mut mem, "my-request-context").unwrap();
 /// vhost.get_submission_fd().write(1).unwrap();
 ///
 /// // Wait for its completion
@@ -192,24 +191,24 @@ struct VirtioBlkReqBuf {
 ///     }
 ///
 ///     for c in queues[0].completions() {
-///         println!("Completed request {}, return value {}", c.user_data, c.ret);
+///         println!("Completed request with context {:?}, return value {}", c.context, c.ret);
 ///         done = true;
 ///     }
 /// }
 /// ```
 ///
 /// [`setup_queues`]: Self::setup_queues
-pub struct VirtioBlkQueue<'a> {
+pub struct VirtioBlkQueue<'a, C> {
     vq: Virtqueue<'a, VirtioBlkReqBuf>,
-    requests: Box<[Option<VirtioBlkRequest>]>,
+    req_contexts: Box<[Option<C>]>,
 }
 
-impl<'a> VirtioBlkQueue<'a> {
+impl<'a, C> VirtioBlkQueue<'a, C> {
     fn new(vq: Virtqueue<'a, VirtioBlkReqBuf>) -> Self {
         let queue_size = vq.queue_size().into();
-        let requests = vec![None; queue_size].into_boxed_slice();
+        let req_contexts = iter::repeat_with(|| None).take(queue_size).collect();
 
-        Self { vq, requests }
+        Self { vq, req_contexts }
     }
 
     /// Creates the queues for a virtio-blk device.
@@ -251,7 +250,7 @@ impl<'a> VirtioBlkQueue<'a> {
         offset: u64,
         buf: &[iovec],
         dwz_data: Option<DiscardWriteZeroesData>,
-        user_data: usize,
+        context: C,
     ) -> Result<(), Error> {
         let lba = to_lba(offset)?;
 
@@ -295,7 +294,7 @@ impl<'a> VirtioBlkQueue<'a> {
             Ok(())
         })?;
 
-        let old = self.requests[desc_idx as usize].replace(VirtioBlkRequest { user_data });
+        let old = self.req_contexts[desc_idx as usize].replace(context);
         assert!(old.is_none());
 
         Ok(())
@@ -306,14 +305,14 @@ impl<'a> VirtioBlkQueue<'a> {
         req_type: VirtioBlkReqType,
         offset: u64,
         buf: &[iovec],
-        user_data: usize,
+        context: C,
     ) -> Result<(), Error> {
-        self.queue_request_full(req_type, offset, buf, None, user_data)
+        self.queue_request_full(req_type, offset, buf, None, context)
     }
 
     /// Reads from the disk image into a given iovec.
     ///
-    /// `user_data` is an arbitrary caller-defined value that is returned in the corresponding
+    /// `context` is an arbitrary caller-defined value that is returned in the corresponding
     /// [`Completion`] to allow associating the result with a specific request.
     ///
     /// # Safety
@@ -325,15 +324,15 @@ impl<'a> VirtioBlkQueue<'a> {
         offset: u64,
         iovec: *const iovec,
         iovcnt: usize,
-        user_data: usize,
+        context: C,
     ) -> Result<(), Error> {
         let iov = unsafe { std::slice::from_raw_parts(iovec, iovcnt) };
-        self.queue_request(VirtioBlkReqType::Read, offset, iov, user_data)
+        self.queue_request(VirtioBlkReqType::Read, offset, iov, context)
     }
 
     /// Reads from the disk image into a given buffer.
     ///
-    /// `user_data` is an arbitrary caller-defined value that is returned in the corresponding
+    /// `context` is an arbitrary caller-defined value that is returned in the corresponding
     /// [`Completion`] to allow associating the result with a specific request.
     ///
     /// # Safety
@@ -344,27 +343,27 @@ impl<'a> VirtioBlkQueue<'a> {
         offset: u64,
         buf: *mut u8,
         len: usize,
-        user_data: usize,
+        context: C,
     ) -> Result<(), Error> {
         let iov = iovec {
             iov_base: buf as *mut c_void,
             iov_len: len,
         };
 
-        self.queue_request(VirtioBlkReqType::Read, offset, &[iov], user_data)
+        self.queue_request(VirtioBlkReqType::Read, offset, &[iov], context)
     }
 
     /// Reads from the disk image into a given byte slice.
     ///
-    /// `user_data` is an arbitrary caller-defined value that is returned in the corresponding
+    /// `context` is an arbitrary caller-defined value that is returned in the corresponding
     /// [`Completion`] to allow associating the result with a specific request.
-    pub fn read(&mut self, offset: u64, buf: &mut [u8], user_data: usize) -> Result<(), Error> {
-        unsafe { self.read_raw(offset, buf.as_mut_ptr(), buf.len(), user_data) }
+    pub fn read(&mut self, offset: u64, buf: &mut [u8], context: C) -> Result<(), Error> {
+        unsafe { self.read_raw(offset, buf.as_mut_ptr(), buf.len(), context) }
     }
 
     /// Writes to the disk image from a given iovec.
     ///
-    /// `user_data` is an arbitrary caller-defined value that is returned in the corresponding
+    /// `context` is an arbitrary caller-defined value that is returned in the corresponding
     /// [`Completion`] to allow associating the result with a specific request.
     ///
     /// # Safety
@@ -376,15 +375,15 @@ impl<'a> VirtioBlkQueue<'a> {
         offset: u64,
         iovec: *const iovec,
         iovcnt: usize,
-        user_data: usize,
+        context: C,
     ) -> Result<(), Error> {
         let iov = unsafe { std::slice::from_raw_parts(iovec, iovcnt) };
-        self.queue_request(VirtioBlkReqType::Write, offset, iov, user_data)
+        self.queue_request(VirtioBlkReqType::Write, offset, iov, context)
     }
 
     /// Writes to the disk image from a given buffer.
     ///
-    /// `user_data` is an arbitrary caller-defined value that is returned in the corresponding
+    /// `context` is an arbitrary caller-defined value that is returned in the corresponding
     /// [`Completion`] to allow associating the result with a specific request.
     ///
     /// # Safety
@@ -395,22 +394,22 @@ impl<'a> VirtioBlkQueue<'a> {
         offset: u64,
         buf: *const u8,
         len: usize,
-        user_data: usize,
+        context: C,
     ) -> Result<(), Error> {
         let iov = iovec {
             iov_base: buf as *mut c_void,
             iov_len: len,
         };
 
-        self.queue_request(VirtioBlkReqType::Write, offset, &[iov], user_data)
+        self.queue_request(VirtioBlkReqType::Write, offset, &[iov], context)
     }
 
     /// Writes to the disk image from a given byte slice.
     ///
-    /// `user_data` is an arbitrary caller-defined value that is returned in the corresponding
+    /// `context` is an arbitrary caller-defined value that is returned in the corresponding
     /// [`Completion`] to allow associating the result with a specific request.
-    pub fn write(&mut self, offset: u64, buf: &[u8], user_data: usize) -> Result<(), Error> {
-        unsafe { self.write_raw(offset, buf.as_ptr(), buf.len(), user_data) }
+    pub fn write(&mut self, offset: u64, buf: &[u8], context: C) -> Result<(), Error> {
+        unsafe { self.write_raw(offset, buf.as_ptr(), buf.len(), context) }
     }
 
     /// Discards an area in the disk image.
@@ -419,11 +418,11 @@ impl<'a> VirtioBlkQueue<'a> {
     /// and doing nothing is a valid implementation. This means that the discarded data may remain
     /// accessible, this is not a way to safely delete data.
     ///
-    /// `user_data` is an arbitrary caller-defined value that is returned in the corresponding
+    /// `context` is an arbitrary caller-defined value that is returned in the corresponding
     /// [`Completion`] to allow associating the result with a specific request.
-    pub fn discard(&mut self, offset: u64, len: u64, user_data: usize) -> Result<(), Error> {
+    pub fn discard(&mut self, offset: u64, len: u64, context: C) -> Result<(), Error> {
         let dwz_data = DiscardWriteZeroesData::new(offset, len, true)?;
-        self.queue_request_full(VirtioBlkReqType::Discard, 0, &[], Some(dwz_data), user_data)
+        self.queue_request_full(VirtioBlkReqType::Discard, 0, &[], Some(dwz_data), context)
     }
 
     /// Zeroes out an area in the disk image.
@@ -431,14 +430,14 @@ impl<'a> VirtioBlkQueue<'a> {
     /// If `unmap` is `true`, the area is tried to be deallocated if we know that it will read back
     /// as all zeroes afterwards. If it is `false`, allocated parts will remain allocated.
     ///
-    /// `user_data` is an arbitrary caller-defined value that is returned in the corresponding
+    /// `context` is an arbitrary caller-defined value that is returned in the corresponding
     /// [`Completion`] to allow associating the result with a specific request.
     pub fn write_zeroes(
         &mut self,
         offset: u64,
         len: u64,
         unmap: bool,
-        user_data: usize,
+        context: C,
     ) -> Result<(), Error> {
         let dwz_data = DiscardWriteZeroesData::new(offset, len, unmap)?;
         self.queue_request_full(
@@ -446,7 +445,7 @@ impl<'a> VirtioBlkQueue<'a> {
             0,
             &[],
             Some(dwz_data),
-            user_data,
+            context,
         )
     }
 
@@ -456,43 +455,43 @@ impl<'a> VirtioBlkQueue<'a> {
     /// flush request was issued are not sitting in any writeback cache, but are actually stored on
     /// disk.
     ///
-    /// `user_data` is an arbitrary caller-defined value that is returned in the corresponding
+    /// `context` is an arbitrary caller-defined value that is returned in the corresponding
     /// [`Completion`] to allow associating the result with a specific request.
-    pub fn flush(&mut self, user_data: usize) -> Result<(), Error> {
-        self.queue_request(VirtioBlkReqType::Flush, 0, &[], user_data)
+    pub fn flush(&mut self, context: C) -> Result<(), Error> {
+        self.queue_request(VirtioBlkReqType::Flush, 0, &[], context)
     }
 
     /// Returns the result for any completed requests.
-    pub fn completions(&mut self) -> CompletionIter<'_, 'a> {
+    pub fn completions(&mut self) -> CompletionIter<'_, 'a, C> {
         CompletionIter {
             it: self.vq.completions(),
-            requests: &mut self.requests,
+            req_contexts: &mut self.req_contexts,
         }
     }
 }
 
-pub struct CompletionIter<'a, 'queue> {
+pub struct CompletionIter<'a, 'queue, C> {
     it: VirtqueueIter<'a, 'queue, VirtioBlkReqBuf>,
-    requests: &'a mut Box<[Option<VirtioBlkRequest>]>,
+    req_contexts: &'a mut Box<[Option<C>]>,
 }
 
-impl<'queue> Iterator for CompletionIter<'_, 'queue> {
-    type Item = Completion;
+impl<'queue, C> Iterator for CompletionIter<'_, 'queue, C> {
+    type Item = Completion<C>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.it.next().and_then(|completion| {
-            let req = self.requests[completion.idx as usize].take();
+        let completion = self.it.next()?;
 
-            // If the backend sent a completion for a request we never made, just ignore it.
-            req.map(|req| Completion {
-                user_data: req.user_data,
-                ret: match completion.req.status {
-                    0 => 0,
-                    1 => -EIO,
-                    2 => -ENOTSUP,
-                    _ => -EPROTO,
-                },
-            })
+        // If the backend sent a completion for a request we never made, just ignore it.
+        let context = self.req_contexts[completion.idx as usize].take()?;
+
+        Some(Completion {
+            context,
+            ret: match completion.req.status {
+                0 => 0,
+                1 => -EIO,
+                2 => -ENOTSUP,
+                _ => -EPROTO,
+            },
         })
     }
 
