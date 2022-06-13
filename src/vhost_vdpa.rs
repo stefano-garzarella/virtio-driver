@@ -6,6 +6,7 @@ use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::convert::TryFrom;
 use std::fs::OpenOptions;
 use std::io::{Error, ErrorKind};
+use std::marker::PhantomData;
 use std::mem;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::RawFd;
@@ -29,7 +30,8 @@ impl<E: 'static + std::error::Error + Send + Sync> From<E> for VhostVdpaBlkError
 
 type VhostKernVdpa = vhost::vhost_kern::vdpa::VhostKernVdpa<Arc<GuestMemoryMmap>>;
 
-pub struct VhostVdpa {
+/// Type parameters `C` and `R` have the same meaning as in [`VirtioTransport`].
+pub struct VhostVdpa<C: ByteValued, R: Copy> {
     vdpa: VhostKernVdpa,
     features: u64,
     max_queues: usize,
@@ -38,6 +40,7 @@ pub struct VhostVdpa {
     layout: Option<Layout>,
     eventfd_kick: Vec<Rc<EventFd>>,
     eventfd_call: Vec<Rc<EventFd>>,
+    phantom: PhantomData<(C, R)>,
 }
 
 fn vdpa_add_status(vdpa: &VhostKernVdpa, status: u32) -> Result<(), VhostVdpaBlkError> {
@@ -57,7 +60,7 @@ fn vdpa_add_status(vdpa: &VhostKernVdpa, status: u32) -> Result<(), VhostVdpaBlk
     Ok(())
 }
 
-impl VhostVdpa {
+impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
     pub fn new(path: &str, virtio_features: u64) -> Result<Self, VhostVdpaBlkError> {
         let file = OpenOptions::new()
             .custom_flags(libc::O_CLOEXEC)
@@ -111,16 +114,13 @@ impl VhostVdpa {
             memory: std::ptr::null_mut::<u8>(),
             eventfd_kick: Vec::new(),
             eventfd_call: Vec::new(),
+            phantom: PhantomData,
         };
 
         Ok(vu)
     }
 
-    fn setup_queue<R: Copy>(
-        &mut self,
-        queue_idx: usize,
-        q: &Virtqueue<R>,
-    ) -> Result<(), vhost::Error> {
+    fn setup_queue(&mut self, queue_idx: usize, q: &Virtqueue<R>) -> Result<(), vhost::Error> {
         let vdpa = &mut self.vdpa;
 
         vdpa.set_vring_num(queue_idx, q.queue_size())?;
@@ -147,7 +147,7 @@ impl VhostVdpa {
     }
 }
 
-impl Drop for VhostVdpa {
+impl<C: ByteValued, R: Copy> Drop for VhostVdpa<C, R> {
     fn drop(&mut self) {
         if self.layout.is_some() {
             let layout = self.layout.unwrap();
@@ -161,7 +161,7 @@ impl Drop for VhostVdpa {
     }
 }
 
-impl VirtioTransport for VhostVdpa {
+impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
     fn max_queues(&self) -> usize {
         self.max_queues
     }
@@ -217,7 +217,7 @@ impl VirtioTransport for VhostVdpa {
         Ok(())
     }
 
-    fn setup_queues<R: Copy>(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
+    fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
         for (i, q) in queues.iter().enumerate() {
             self.eventfd_kick.push(Rc::new(EventFd::new(0).unwrap()));
             self.eventfd_call.push(Rc::new(EventFd::new(0).unwrap()));
@@ -232,7 +232,7 @@ impl VirtioTransport for VhostVdpa {
         self.features
     }
 
-    fn get_config<C: ByteValued>(&mut self) -> Result<C, Error> {
+    fn get_config(&mut self) -> Result<C, Error> {
         let cfg_size: usize = mem::size_of::<C>();
         let mut buf = vec![0u8; cfg_size];
 
