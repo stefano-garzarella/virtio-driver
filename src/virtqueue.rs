@@ -84,7 +84,7 @@ impl VirtqueueLayout {
 
 /// This can represent (depending on `T`) `struct virtq_avail` or `struct virtq_used` from the
 /// VIRTIO 1.1 specification (see 2.6.6 and 2.6.8).
-//#[repr(C, packed)]
+#[repr(C)]
 struct VirtqueueRingData<T> {
     _flags: Le16,
     idx: AtomicU16,
