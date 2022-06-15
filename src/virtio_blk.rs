@@ -108,7 +108,7 @@ struct VirtioBlkReqHeader {
     sector: Le64,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 enum VirtioBlkReqType {
     Read = 0,
