@@ -37,6 +37,8 @@ bitflags! {
         const ORDER_PLATFORM = 1 << 36;
         const SR_IOV = 1 << 37;
         const NOTIFICATION_DATA = 1 << 38;
+        const NOTIF_CONFIG_DATA = 1 << 39;
+        const RING_RESET = 1 << 40;
     }
 }
 

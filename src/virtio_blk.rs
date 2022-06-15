@@ -20,8 +20,11 @@ bitflags! {
         const FLUSH = 1 << 9;
         const TOPOLOGY = 1 << 10;
         const CONFIG_WCE = 1 << 11;
+        const MQ = 1 << 12;
         const DISCARD = 1 << 13;
         const WRITE_ZEROES = 1 << 14;
+        const LIFETIME = 1 << 15;
+        const SECURE_ERASE = 1 << 16;
     }
 }
 
