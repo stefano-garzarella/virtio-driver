@@ -149,14 +149,15 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 
 /// A queue of a virtio-blk device.
 ///
-/// This is used to send block I/O requests to the device and receive completions. Note that
-/// calling transport specific functions may need to be called before or after certain operations
-/// on the `VirtioBlkQueue`:
+/// This is used to send block I/O requests to the device and receive completions. Note that calling
+/// transport specific functions may need to be called before or after certain operations on the
+/// `VirtioBlkQueue`:
 ///
 /// * All request methods only enqueue the requests in the rings. They don't notify the device of
-///   new requests, so it may or may not start processing them. Write to the `EventFd` returned
-///   by [`VirtioTransport::get_submission_fd`] after queuing requests to notify the device. You
-///   can queue multiple requests and then send a single notification for all of them.
+///   new requests, so it may or may not start processing them. Call
+///   [`crate::QueueNotifier::notify`] on the result of [`VirtioTransport::get_submission_notifier`]
+///   after queuing requests to notify the device. You can queue multiple requests and then send a
+///   single notification for all of them.
 ///
 /// * To be notified of new completions, use the `EventFd` returned by
 ///   [`VirtioTransport::get_completion_fd`].
@@ -184,7 +185,7 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 ///
 /// // Submit a request
 /// queues[0].read(0, &mut mem, "my-request-context")?;
-/// vhost.get_submission_fd(0).write(1)?;
+/// vhost.get_submission_notifier(0).notify()?;
 ///
 /// // Wait for its completion
 /// let mut done = false;

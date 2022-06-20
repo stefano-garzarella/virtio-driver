@@ -4,7 +4,7 @@ mod vhost_bindings;
 mod vhost_vdpa_kernel;
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-use crate::{ByteValued, EfdFlags, EventFd, VirtioFeatureFlags, VirtioTransport};
+use crate::{ByteValued, EfdFlags, EventFd, QueueNotifier, VirtioFeatureFlags, VirtioTransport};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
@@ -189,11 +189,22 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         Ok(*C::from_slice(&buf).unwrap())
     }
 
-    fn get_submission_fd(&self, queue_idx: usize) -> Arc<EventFd> {
-        Arc::clone(&self.eventfd_kick[queue_idx])
+    fn get_submission_notifier(&self, queue_idx: usize) -> Box<dyn QueueNotifier> {
+        let eventfd = Arc::clone(&self.eventfd_kick[queue_idx]);
+        Box::new(VhostVdpaNotifier { eventfd })
     }
 
     fn get_completion_fd(&self, queue_idx: usize) -> Arc<EventFd> {
         Arc::clone(&self.eventfd_call[queue_idx])
+    }
+}
+
+struct VhostVdpaNotifier {
+    eventfd: Arc<EventFd>,
+}
+
+impl QueueNotifier for VhostVdpaNotifier {
+    fn notify(&self) -> Result<(), Error> {
+        self.eventfd.write(1)
     }
 }

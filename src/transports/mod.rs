@@ -61,10 +61,16 @@ pub trait VirtioTransport<C: ByteValued, R: Copy> {
     /// Queries the device configuration.
     fn get_config(&self) -> Result<C, Error>;
 
-    /// Returns an [`EventFd`] that can be written to notify the device of new requests in the
+    /// Returns a [`QueueNotifier`] that can be used to notify the device of new requests in the
     /// queue.
-    fn get_submission_fd(&self, queue_idx: usize) -> Arc<EventFd>;
+    fn get_submission_notifier(&self, queue_idx: usize) -> Box<dyn QueueNotifier>;
 
     /// Returns an [`EventFd`] that can be read to be notified of request completions in the queue.
     fn get_completion_fd(&self, queue_idx: usize) -> Arc<EventFd>;
+}
+
+/// A trait for types that can be used to submit available buffer notifications to a queue.
+pub trait QueueNotifier {
+    /// Trigger an available buffer notification.
+    fn notify(&self) -> Result<(), Error>;
 }

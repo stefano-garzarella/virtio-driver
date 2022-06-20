@@ -4,7 +4,7 @@ mod front_end;
 mod vhost_user_protocol;
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-use crate::{ByteValued, EfdFlags, EventFd, VirtioTransport};
+use crate::{ByteValued, EfdFlags, EventFd, QueueNotifier, VirtioTransport};
 use front_end::{VhostUserFrontEnd, VhostUserMemoryRegionInfo};
 use memfd::MemfdOptions;
 use memmap::MmapMut;
@@ -261,11 +261,22 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
         Ok(*C::from_slice(&buf).unwrap())
     }
 
-    fn get_submission_fd(&self, queue_idx: usize) -> Arc<EventFd> {
-        Arc::clone(&self.eventfd_kick[queue_idx])
+    fn get_submission_notifier(&self, queue_idx: usize) -> Box<dyn QueueNotifier> {
+        let eventfd = Arc::clone(&self.eventfd_kick[queue_idx]);
+        Box::new(VhostUserNotifier { eventfd })
     }
 
     fn get_completion_fd(&self, queue_idx: usize) -> Arc<EventFd> {
         Arc::clone(&self.eventfd_call[queue_idx])
+    }
+}
+
+struct VhostUserNotifier {
+    eventfd: Arc<EventFd>,
+}
+
+impl QueueNotifier for VhostUserNotifier {
+    fn notify(&self) -> Result<(), Error> {
+        self.eventfd.write(1)
     }
 }
