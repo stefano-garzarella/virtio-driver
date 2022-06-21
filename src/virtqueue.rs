@@ -84,7 +84,7 @@ impl VirtqueueLayout {
 
 /// This can represent (depending on `T`) `struct virtq_avail` or `struct virtq_used` from the
 /// VIRTIO 1.1 specification (see 2.6.6 and 2.6.8).
-//#[repr(C, packed)]
+#[repr(C)]
 struct VirtqueueRingData<T> {
     _flags: Le16,
     idx: AtomicU16,
@@ -109,12 +109,13 @@ impl<'a, T: Clone> VirtqueueRing<'a, T> {
         // actual ring buffer. `queue_size` is the number of entries in the ring buffer.
         assert!(mem.len() >= 4 + queue_size * mem::size_of::<T>());
 
+        // VirtqueueRingData is a DST because of the unsized `ring` field. Construct a fat
+        // pointer to it by casting a slice pointer.
+        let slice_ptr = std::ptr::slice_from_raw_parts_mut(mem.as_mut_ptr(), queue_size);
+        let ptr = slice_ptr as *mut VirtqueueRingData<T>;
+
         VirtqueueRing {
-            ptr: unsafe {
-                // VirtqueueRingData is a DST because of the unsized `ring` field. Construct a fat
-                // pointer to it by transmuting a tuple of a thin pointer and the slice size.
-                mem::transmute::<_, *mut VirtqueueRingData<T>>((mem.as_mut_ptr(), queue_size))
-            },
+            ptr,
             _ptr_lifetime: PhantomData,
             queue_size,
             next_idx: Wrapping(0),
