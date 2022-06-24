@@ -424,7 +424,7 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
     /// `context` is an arbitrary caller-defined value that is returned in the corresponding
     /// [`Completion`] to allow associating the result with a specific request.
     pub fn discard(&mut self, offset: u64, len: u64, context: C) -> Result<(), Error> {
-        let dwz_data = DiscardWriteZeroesData::new(offset, len, true)?;
+        let dwz_data = DiscardWriteZeroesData::new(offset, len, false)?;
         self.queue_request_full(VirtioBlkReqType::Discard, 0, &[], Some(dwz_data), context)
     }
 
