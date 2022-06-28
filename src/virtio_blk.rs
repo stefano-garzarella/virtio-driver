@@ -141,11 +141,13 @@ impl VirtioBlkReqHeader {
 unsafe impl ByteValued for VirtioBlkReqHeader {}
 
 #[derive(Clone, Copy)]
-struct VirtioBlkReqBuf {
+pub struct VirtioBlkReqBuf {
     header: VirtioBlkReqHeader,
     status: u8,
     dwz_data: DiscardWriteZeroesData,
 }
+
+pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqBuf>;
 
 /// A queue of a virtio-blk device.
 ///
@@ -216,7 +218,7 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
 
     /// Creates the queues for a virtio-blk device.
     pub fn setup_queues(
-        transport: &mut impl VirtioTransport,
+        transport: &mut VirtioBlkTransport,
         num_queues: usize,
         queue_size: u16,
     ) -> Result<Vec<Self>, Error> {

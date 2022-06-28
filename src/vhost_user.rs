@@ -7,6 +7,7 @@ use memmap::MmapMut;
 use std::convert::{TryFrom, TryInto};
 use std::fs::File;
 use std::io::{Error, ErrorKind};
+use std::marker::PhantomData;
 use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::rc::Rc;
@@ -34,7 +35,9 @@ impl From<vhost::Error> for VhostUserError {
 }
 
 /// The transport to connect to a device using the vhost-user protocol.
-pub struct VhostUser {
+///
+/// Type parameters `C` and `R` have the same meaning as in [`VirtioTransport`].
+pub struct VhostUser<C: ByteValued, R: Copy> {
     vhost: Master,
     features: u64,
     max_queues: usize,
@@ -44,10 +47,11 @@ pub struct VhostUser {
     mmap: Option<MmapMut>,
     eventfd_kick: Vec<Rc<EventFd>>,
     eventfd_call: Vec<Rc<EventFd>>,
+    phantom: PhantomData<(C, R)>,
 }
 
-impl VhostUser {
-    fn connect(path: &str, virtio_features: u64) -> Result<VhostUser, VhostUserError> {
+impl<C: ByteValued, R: Copy> VhostUser<C, R> {
+    fn connect(path: &str, virtio_features: u64) -> Result<Self, VhostUserError> {
         let mut vhost = Master::connect(path, 0)?;
         vhost.set_owner()?;
 
@@ -103,6 +107,7 @@ impl VhostUser {
             mmap: None,
             eventfd_kick: Vec::new(),
             eventfd_call: Vec::new(),
+            phantom: PhantomData,
         };
 
         Ok(vu)
@@ -122,11 +127,11 @@ impl VhostUser {
     /// let vhost = VhostUser::new("/tmp/vhost.sock").unwrap();
     /// let queues = VirtioBlkQueue::setup_queues(vhost, NUM_QUEUES, QUEUE_SIZE);
     /// ```
-    pub fn new(path: &str, virtio_features: u64) -> Result<VhostUser, Error> {
+    pub fn new(path: &str, virtio_features: u64) -> Result<Self, Error> {
         Self::connect(path, virtio_features).map_err(|e| e.0)
     }
 
-    fn setup_queue<R: Copy>(&mut self, i: usize, q: &Virtqueue<R>) -> Result<(), vhost::Error> {
+    fn setup_queue(&mut self, i: usize, q: &Virtqueue<R>) -> Result<(), vhost::Error> {
         let vhost = &mut self.vhost;
         vhost.set_vring_num(i, q.queue_size())?;
         vhost.set_vring_base(i, 0)?;
@@ -150,7 +155,7 @@ impl VhostUser {
     }
 }
 
-impl VirtioTransport for VhostUser {
+impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
     fn max_queues(&self) -> usize {
         self.max_queues
     }
@@ -231,7 +236,7 @@ impl VirtioTransport for VhostUser {
         ))
     }
 
-    fn setup_queues<R: Copy>(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
+    fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
         for (i, q) in queues.iter().enumerate() {
             self.eventfd_kick.push(Rc::new(EventFd::new(0).unwrap()));
             self.eventfd_call.push(Rc::new(EventFd::new(0).unwrap()));
@@ -252,7 +257,7 @@ impl VirtioTransport for VhostUser {
         self.features
     }
 
-    fn get_config<C: ByteValued>(&mut self) -> Result<C, Error> {
+    fn get_config(&mut self) -> Result<C, Error> {
         let cfg_size: usize = mem::size_of::<C>();
         let buf = vec![0u8; cfg_size];
         let (_cfg, cfg_payload) = self

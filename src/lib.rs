@@ -23,7 +23,10 @@ pub use vhost_user::VhostUser;
 #[cfg(feature = "vhost-vdpa")]
 pub use vhost_vdpa::VhostVdpa;
 
-pub use virtio_blk::{validate_lba, VirtioBlkConfig, VirtioBlkFeatureFlags, VirtioBlkQueue};
+pub use virtio_blk::{
+    validate_lba, VirtioBlkConfig, VirtioBlkFeatureFlags, VirtioBlkQueue, VirtioBlkReqBuf,
+    VirtioBlkTransport,
+};
 use virtqueue::{Virtqueue, VirtqueueLayout};
 
 bitflags! {
@@ -54,7 +57,12 @@ pub struct Completion<C> {
 }
 
 /// An interface to the virtio transport/bus of a device
-pub trait VirtioTransport {
+///
+/// Type parameters:
+/// - `C` represents the device configuration space, as returned by [`VirtioTransport::get_config`];
+/// - `R` has the same meaning as in [`Virtqueue`], and is used to store device-specific per-request
+///   data.
+pub trait VirtioTransport<C: ByteValued, R: Copy> {
     /// Returns the maximum number of queues supported by the device.
     fn max_queues(&self) -> usize;
 
@@ -83,13 +91,13 @@ pub trait VirtioTransport {
     fn del_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error>;
 
     /// Initialises and enables the passed queues on the transport level.
-    fn setup_queues<R: Copy>(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error>;
+    fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error>;
 
     /// Returns the negotiated virtio feature flags.
     fn get_features(&self) -> u64;
 
     /// Queries the device configuration.
-    fn get_config<C: ByteValued>(&mut self) -> Result<C, Error>;
+    fn get_config(&mut self) -> Result<C, Error>;
 
     /// Returns an [`EventFd`] that can be written to notify the device of new requests in the
     /// queue.
