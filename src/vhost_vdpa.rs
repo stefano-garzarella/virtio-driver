@@ -197,7 +197,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         Ok(vq_mem)
     }
 
-    fn add_mem_region(
+    fn map_mem_region(
         &mut self,
         addr: usize,
         len: usize,
@@ -210,7 +210,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         Ok(())
     }
 
-    fn del_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error> {
+    fn unmap_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error> {
         self.vdpa
             .dma_unmap(addr as u64, len as u64)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;

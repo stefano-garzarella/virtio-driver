@@ -181,7 +181,7 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 /// let mem_file = memfd::MemfdOptions::new().create("guest-ram").unwrap().into_file();
 /// mem_file.set_len(512).unwrap();
 /// let mut mem = unsafe { memmap::MmapMut::map_mut(&mem_file) }.unwrap();
-/// vhost.add_mem_region(mem.as_ptr() as usize, 512, mem_file.as_raw_fd(), 0).unwrap();
+/// vhost.map_mem_region(mem.as_ptr() as usize, 512, mem_file.as_raw_fd(), 0).unwrap();
 ///
 /// // Submit a request
 /// queues[0].read(0, &mut mem, "my-request-context").unwrap();

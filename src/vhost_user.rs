@@ -183,7 +183,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
 
         let mmap = unsafe { MmapMut::map_mut(&self.virtqueue_mem_file) }?;
 
-        self.add_mem_region(
+        self.map_mem_region(
             mmap.as_ptr() as usize,
             mmap.len(),
             self.virtqueue_mem_file.as_raw_fd(),
@@ -194,7 +194,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
         Ok(self.mmap.as_mut().unwrap().as_mut())
     }
 
-    fn add_mem_region(
+    fn map_mem_region(
         &mut self,
         addr: usize,
         len: usize,
@@ -220,7 +220,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
         Ok(())
     }
 
-    fn del_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error> {
+    fn unmap_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error> {
         for (i, region) in self.mem_table.iter().enumerate() {
             if region.userspace_addr == addr as u64 && region.memory_size == len as u64 {
                 self.vhost

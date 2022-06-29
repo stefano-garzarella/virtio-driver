@@ -76,10 +76,10 @@ pub trait VirtioTransport<C: ByteValued, R: Copy> {
     /// visible for the device.
     fn alloc_queue_mem(&mut self, layout: &VirtqueueLayout) -> Result<&mut [u8], Error>;
 
-    /// Registers a memory region with the transport.
+    /// Maps a memory region with the transport.
     ///
-    /// Requests to the device may only refer to memory that is in a registered memory region.
-    fn add_mem_region(
+    /// Requests to the device may only refer to memory that is in a mapped memory region.
+    fn map_mem_region(
         &mut self,
         addr: usize,
         len: usize,
@@ -87,8 +87,8 @@ pub trait VirtioTransport<C: ByteValued, R: Copy> {
         fd_offset: i64,
     ) -> Result<(), Error>;
 
-    /// Unregisters a memory region from the transport.
-    fn del_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error>;
+    /// Unmaps a memory region from the transport.
+    fn unmap_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error>;
 
     /// Initialises and enables the passed queues on the transport level.
     fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error>;
