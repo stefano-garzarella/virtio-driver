@@ -13,6 +13,7 @@ use std::os::unix::io::RawFd;
 use std::rc::Rc;
 use std::sync::Arc;
 use vhost::vdpa::VhostVdpa as VhostVdpaBackend;
+use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_IOTLB_MSG_V2;
 use vhost::vhost_kern::VhostKernFeatures;
 use vhost::{VhostBackend, VringConfigData};
 use virtio_bindings::bindings::virtio_blk::*;
@@ -87,8 +88,9 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
         vdpa.set_owner()?;
 
         let backend_features = vdpa.get_backend_features()?;
-        //TODO: ack only supported features by the backend (should be done by vhost crate?)
-        vdpa.set_backend_features(backend_features)?;
+        // We only need VHOST_BACKEND_F_IOTLB_MSG_V2 (if available) to support
+        // dma_map/dma_unmap messages
+        vdpa.set_backend_features(backend_features & VHOST_BACKEND_F_IOTLB_MSG_V2)?;
 
         vdpa.set_status(0)?;
 
