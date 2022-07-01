@@ -4,11 +4,15 @@ use std::io::Error;
 use std::os::unix::io::RawFd;
 use std::sync::Arc;
 
+#[cfg(feature = "pci")]
+mod pci;
 #[cfg(feature = "vhost-user")]
 mod vhost_user;
 #[cfg(feature = "vhost-vdpa")]
 mod vhost_vdpa;
 
+#[cfg(feature = "pci")]
+pub use pci::Pci;
 #[cfg(feature = "vhost-user")]
 pub use vhost_user::VhostUser;
 #[cfg(feature = "vhost-vdpa")]
