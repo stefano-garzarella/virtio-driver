@@ -122,9 +122,11 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
     ///
     /// # Examples
     ///
-    /// ```
-    /// let vhost = VhostUser::new("/tmp/vhost.sock").unwrap();
-    /// let queues = VirtioBlkQueue::setup_queues(vhost, NUM_QUEUES, QUEUE_SIZE);
+    /// ```no_run
+    /// # use virtio_driver::{VhostUser, VirtioBlkQueue, VirtioFeatureFlags};
+    /// let mut vhost = VhostUser::new("/tmp/vhost.sock", VirtioFeatureFlags::VERSION_1.bits())?;
+    /// let mut queues = VirtioBlkQueue::<()>::setup_queues(&mut vhost, 1, 128);
+    /// # Result::<(), Box<dyn std::error::Error>>::Ok(())
     /// ```
     pub fn new(path: &str, virtio_features: u64) -> Result<Self, Error> {
         Self::connect(path, virtio_features).map_err(|e| e.0)

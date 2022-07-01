@@ -11,7 +11,7 @@
 //!
 //! # Examples
 //!
-//! ```
+//! ```ignore
 //! # use  data_model::*;
 //!   let b: Be32 = From::from(3);
 //!   let l: Le32 = From::from(3);
