@@ -1,24 +1,18 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
+mod vhost_bindings;
+mod vhost_vdpa_kernel;
+
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
 use crate::{ByteValued, EfdFlags, EventFd, VirtioFeatureFlags, VirtioTransport};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
-use std::convert::TryFrom;
-use std::fs::OpenOptions;
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
-use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::rc::Rc;
-use std::sync::Arc;
-use vhost::vdpa::VhostVdpa as VhostVdpaBackend;
-use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_IOTLB_MSG_V2;
-use vhost::vhost_kern::VhostKernFeatures;
-use vhost::{VhostBackend, VringConfigData};
+use vhost_vdpa_kernel::VhostVdpaKernel;
 use virtio_bindings::bindings::virtio_blk::*;
-use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap, MmapRegion};
-use vmm_sys_util::eventfd::EventFd as EventFdVmm;
 
 #[derive(Debug)]
 pub struct VhostVdpaBlkError(std::io::Error);
@@ -29,11 +23,9 @@ impl<E: 'static + std::error::Error + Send + Sync> From<E> for VhostVdpaBlkError
     }
 }
 
-type VhostKernVdpa = vhost::vhost_kern::vdpa::VhostKernVdpa<Arc<GuestMemoryMmap>>;
-
 /// Type parameters `C` and `R` have the same meaning as in [`VirtioTransport`].
 pub struct VhostVdpa<C: ByteValued, R: Copy> {
-    vdpa: VhostKernVdpa,
+    vdpa: VhostVdpaKernel,
     features: u64,
     max_queues: usize,
     max_mem_regions: u64,
@@ -44,64 +36,20 @@ pub struct VhostVdpa<C: ByteValued, R: Copy> {
     phantom: PhantomData<(C, R)>,
 }
 
-fn vdpa_add_status(vdpa: &VhostKernVdpa, status: u32) -> Result<(), VhostVdpaBlkError> {
-    let status = u8::try_from(status)?;
-    let mut current_status = vdpa.get_status()?;
-
-    vdpa.set_status(current_status | status)?;
-
-    current_status = vdpa.get_status()?;
-    if (current_status & status) != status {
-        return Err(VhostVdpaBlkError(Error::new(
-            ErrorKind::Other,
-            "failed to set the status".to_string(),
-        )));
-    }
-
-    Ok(())
-}
-
 impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
     pub fn new(path: &str, virtio_features: u64) -> Result<Self, VhostVdpaBlkError> {
-        let file = OpenOptions::new()
-            .custom_flags(libc::O_CLOEXEC)
-            .write(true)
-            .open(path)?;
-
-        /* Workaround to disable all the protection provided by GuestMemory
-         * since we are not using GuestMemoryMmap to map the guest address
-         * space.
-         */
-        let mr = unsafe {
-            MmapRegion::<()>::build_raw(
-                std::ptr::null_mut::<u8>(),
-                usize::MAX,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_NORESERVE | libc::MAP_PRIVATE,
-            )?
-        };
-        let gmr = GuestRegionMmap::new(mr, GuestAddress(0))?;
-        let m = GuestMemoryMmap::from_regions(vec![gmr])?;
-
-        let mut vdpa = VhostKernVdpa::with(file, Arc::new(m), 0);
-
-        vdpa.set_owner()?;
-
-        let backend_features = vdpa.get_backend_features()?;
-        // We only need VHOST_BACKEND_F_IOTLB_MSG_V2 (if available) to support
-        // dma_map/dma_unmap messages
-        vdpa.set_backend_features(backend_features & VHOST_BACKEND_F_IOTLB_MSG_V2)?;
+        let mut vdpa = VhostVdpaKernel::new(path)?;
 
         vdpa.set_status(0)?;
 
-        vdpa_add_status(&vdpa, VIRTIO_CONFIG_S_ACKNOWLEDGE | VIRTIO_CONFIG_S_DRIVER)?;
+        vdpa.add_status((VIRTIO_CONFIG_S_ACKNOWLEDGE | VIRTIO_CONFIG_S_DRIVER) as u8)?;
 
         let mut features = vdpa.get_features()?;
         // VIRTIO_F_ACCESS_PLATFORM required by vhost-vdpa kernel module
         features &= virtio_features | VirtioFeatureFlags::ACCESS_PLATFORM.bits();
         vdpa.set_features(features)?;
 
-        vdpa_add_status(&vdpa, VIRTIO_CONFIG_S_FEATURES_OK)?;
+        vdpa.add_status(VIRTIO_CONFIG_S_FEATURES_OK as u8)?;
 
         //TODO: VHOST_VDPA_GET_VQS_COUNT support (we need to update the vhost crate)
         let max_queues = u16::MAX as usize;
@@ -122,30 +70,20 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
         Ok(vu)
     }
 
-    fn setup_queue(&mut self, queue_idx: usize, q: &Virtqueue<R>) -> Result<(), vhost::Error> {
+    fn setup_queue(&mut self, queue_idx: usize, q: &Virtqueue<R>) -> Result<(), Error> {
         let vdpa = &mut self.vdpa;
 
-        vdpa.set_vring_num(queue_idx, q.queue_size())?;
+        vdpa.set_vring_num(queue_idx, q.queue_size().into())?;
         vdpa.set_vring_base(queue_idx, 0)?;
         vdpa.set_vring_addr(
             queue_idx,
-            &VringConfigData {
-                queue_max_size: q.queue_size(),
-                queue_size: q.queue_size(),
-                flags: 0,
-                desc_table_addr: q.desc_table_ptr() as u64,
-                avail_ring_addr: q.avail_ring_ptr() as u64,
-                used_ring_addr: q.used_ring_ptr() as u64,
-                log_addr: None,
-            },
+            q.desc_table_ptr() as u64,
+            q.used_ring_ptr() as u64,
+            q.avail_ring_ptr() as u64,
         )?;
 
-        vdpa.set_vring_kick(queue_idx, unsafe {
-            &EventFdVmm::from_raw_fd(self.eventfd_kick[queue_idx].as_raw_fd())
-        })?;
-        vdpa.set_vring_call(queue_idx, unsafe {
-            &EventFdVmm::from_raw_fd(self.eventfd_call[queue_idx].as_raw_fd())
-        })?;
+        vdpa.set_vring_kick(queue_idx, self.eventfd_kick[queue_idx].as_raw_fd())?;
+        vdpa.set_vring_call(queue_idx, self.eventfd_call[queue_idx].as_raw_fd())?;
 
         vdpa.set_vring_enable(queue_idx, true)?;
 
@@ -233,7 +171,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
                 .map_err(|e| Error::new(ErrorKind::Other, e))?;
         }
 
-        vdpa_add_status(&self.vdpa, VIRTIO_CONFIG_S_DRIVER_OK).map_err(|e| e.0)
+        self.vdpa.add_status(VIRTIO_CONFIG_S_DRIVER_OK as u8)
     }
 
     fn get_features(&self) -> u64 {
