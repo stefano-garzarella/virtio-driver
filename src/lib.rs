@@ -19,6 +19,7 @@ mod vhost_user;
 mod vhost_vdpa;
 
 pub use util::bytevalued::*;
+pub use util::endian::*;
 
 #[cfg(feature = "vhost-user")]
 pub use vhost_user::VhostUser;

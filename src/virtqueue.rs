@@ -2,6 +2,7 @@
 
 //! A virtqueue implementation to be used internally by virtio device drivers.
 
+use crate::{Le16, Le32, Le64};
 use bitflags::bitflags;
 use libc::iovec;
 use std::io::{Error, ErrorKind};
@@ -9,7 +10,6 @@ use std::marker::PhantomData;
 use std::mem;
 use std::num::Wrapping;
 use std::sync::atomic::{AtomicU16, Ordering};
-use vm_memory::{Le16, Le32, Le64};
 
 /// This is `struct virtq_desc` from the VIRTIO 1.1 specification (see 2.6.5).
 #[repr(C, packed)]
