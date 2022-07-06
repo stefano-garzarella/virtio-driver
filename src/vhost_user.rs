@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-use crate::VirtioTransport;
+use crate::{ByteValued, VirtioTransport};
 use memfd::MemfdOptions;
 use memmap::MmapMut;
 use std::convert::{TryFrom, TryInto};
@@ -16,7 +16,6 @@ use vhost::vhost_user::message::{
 };
 use vhost::vhost_user::{Master, VhostUserMaster};
 use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
-use vm_memory::ByteValued;
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 use crate::virtqueue::{Virtqueue, VirtqueueIter, VirtqueueLayout};
-use crate::{Completion, VirtioTransport};
+use crate::{ByteValued, Completion, VirtioTransport};
 use bitflags::bitflags;
 use libc::{c_void, iovec, EIO, ENOTSUP, EPROTO};
 use std::convert::TryFrom;
 use std::io::{Error, ErrorKind};
 use std::iter;
 use std::mem;
-use vm_memory::{ByteValued, Le16, Le32, Le64};
+use vm_memory::{Le16, Le32, Le64};
 
 bitflags! {
     pub struct VirtioBlkFeatureFlags: u64 {

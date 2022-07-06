@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-use crate::{VirtioFeatureFlags, VirtioTransport};
+use crate::{ByteValued, VirtioFeatureFlags, VirtioTransport};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::convert::TryFrom;
 use std::fs::OpenOptions;
@@ -17,7 +17,7 @@ use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_IOTLB_MSG_V2;
 use vhost::vhost_kern::VhostKernFeatures;
 use vhost::{VhostBackend, VringConfigData};
 use virtio_bindings::bindings::virtio_blk::*;
-use vm_memory::{ByteValued, GuestAddress, GuestMemoryMmap, GuestRegionMmap, MmapRegion};
+use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap, MmapRegion};
 use vmm_sys_util::eventfd::EventFd;
 
 #[derive(Debug)]

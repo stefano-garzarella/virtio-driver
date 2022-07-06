@@ -7,9 +7,9 @@ use bitflags::bitflags;
 use std::io::Error;
 use std::os::unix::io::RawFd;
 use std::rc::Rc;
-use vm_memory::ByteValued;
 use vmm_sys_util::eventfd::EventFd;
 
+mod util;
 mod virtio_blk;
 pub mod virtqueue;
 
@@ -17,6 +17,8 @@ pub mod virtqueue;
 mod vhost_user;
 #[cfg(feature = "vhost-vdpa")]
 mod vhost_vdpa;
+
+pub use util::bytevalued::*;
 
 #[cfg(feature = "vhost-user")]
 pub use vhost_user::VhostUser;
