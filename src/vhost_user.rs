@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-use crate::{ByteValued, VirtioTransport};
+use crate::{ByteValued, EfdFlags, EventFd, VirtioTransport};
 use memfd::MemfdOptions;
 use memmap::MmapMut;
 use std::convert::{TryFrom, TryInto};
@@ -9,14 +9,14 @@ use std::fs::File;
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::rc::Rc;
 use vhost::vhost_user::message::{
     VhostUserConfigFlags, VhostUserHeaderFlag, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{Master, VhostUserMaster};
 use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
-use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::eventfd::EventFd as EventFdVmm;
 
 #[derive(Debug)]
 pub struct VhostUserError(Error);
@@ -147,8 +147,12 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
             },
         )?;
 
-        vhost.set_vring_kick(i, &self.eventfd_kick[i])?;
-        vhost.set_vring_call(i, &self.eventfd_call[i])?;
+        vhost.set_vring_kick(i, unsafe {
+            &EventFdVmm::from_raw_fd(self.eventfd_kick[i].as_raw_fd())
+        })?;
+        vhost.set_vring_call(i, unsafe {
+            &EventFdVmm::from_raw_fd(self.eventfd_call[i].as_raw_fd())
+        })?;
         vhost.set_vring_enable(i, true)?;
         Ok(())
     }
@@ -237,8 +241,10 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
 
     fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
         for (i, q) in queues.iter().enumerate() {
-            self.eventfd_kick.push(Rc::new(EventFd::new(0).unwrap()));
-            self.eventfd_call.push(Rc::new(EventFd::new(0).unwrap()));
+            self.eventfd_kick
+                .push(Rc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
+            self.eventfd_call
+                .push(Rc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
             self.setup_queue(i, q).map_err(|e| {
                 // If the user actually retries `setup_queues` instead of dropping the
                 // VhostUser object on error, we're going to reconfigure all queues anyway, so

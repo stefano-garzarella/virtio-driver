@@ -7,7 +7,6 @@ use bitflags::bitflags;
 use std::io::Error;
 use std::os::unix::io::RawFd;
 use std::rc::Rc;
-use vmm_sys_util::eventfd::EventFd;
 
 mod util;
 mod virtio_blk;
@@ -20,6 +19,7 @@ mod vhost_vdpa;
 
 pub use util::bytevalued::*;
 pub use util::endian::*;
+pub use util::eventfd::*;
 
 #[cfg(feature = "vhost-user")]
 pub use vhost_user::VhostUser;

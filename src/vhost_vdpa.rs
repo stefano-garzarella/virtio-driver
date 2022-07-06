@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-use crate::{ByteValued, VirtioFeatureFlags, VirtioTransport};
+use crate::{ByteValued, EfdFlags, EventFd, VirtioFeatureFlags, VirtioTransport};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::convert::TryFrom;
 use std::fs::OpenOptions;
@@ -9,7 +9,7 @@ use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::rc::Rc;
 use std::sync::Arc;
 use vhost::vdpa::VhostVdpa as VhostVdpaBackend;
@@ -18,7 +18,7 @@ use vhost::vhost_kern::VhostKernFeatures;
 use vhost::{VhostBackend, VringConfigData};
 use virtio_bindings::bindings::virtio_blk::*;
 use vm_memory::{GuestAddress, GuestMemoryMmap, GuestRegionMmap, MmapRegion};
-use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::eventfd::EventFd as EventFdVmm;
 
 #[derive(Debug)]
 pub struct VhostVdpaBlkError(std::io::Error);
@@ -140,8 +140,12 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
             },
         )?;
 
-        vdpa.set_vring_kick(queue_idx, &self.eventfd_kick[queue_idx])?;
-        vdpa.set_vring_call(queue_idx, &self.eventfd_call[queue_idx])?;
+        vdpa.set_vring_kick(queue_idx, unsafe {
+            &EventFdVmm::from_raw_fd(self.eventfd_kick[queue_idx].as_raw_fd())
+        })?;
+        vdpa.set_vring_call(queue_idx, unsafe {
+            &EventFdVmm::from_raw_fd(self.eventfd_call[queue_idx].as_raw_fd())
+        })?;
 
         vdpa.set_vring_enable(queue_idx, true)?;
 
@@ -221,8 +225,10 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
 
     fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
         for (i, q) in queues.iter().enumerate() {
-            self.eventfd_kick.push(Rc::new(EventFd::new(0).unwrap()));
-            self.eventfd_call.push(Rc::new(EventFd::new(0).unwrap()));
+            self.eventfd_kick
+                .push(Rc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
+            self.eventfd_call
+                .push(Rc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
             self.setup_queue(i, q)
                 .map_err(|e| Error::new(ErrorKind::Other, e))?;
         }
