@@ -84,8 +84,7 @@ struct DiscardWriteZeroesData {
 impl DiscardWriteZeroesData {
     fn new(offset: u64, len: u64, unmap: bool) -> Result<Self, Error> {
         let start = to_lba(offset)?;
-        let end = to_lba(offset + len)?;
-        let num_sectors = u32::try_from(end - start + 1)
+        let num_sectors = u32::try_from(to_lba(len)?)
             .map_err(|_e| Error::new(ErrorKind::InvalidInput, "Discard length too large"))?;
         let flags = if unmap { 1 } else { 0 };
 
