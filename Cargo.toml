@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Kevin Wolf <kwolf@redhat.com>"]
 edition = "2018"
 license = "LGPL-2.1-or-later"
+description = "virtio driver development library"
+keywords = ["virtio", "driver", "user-space"]
+categories = ["hardware-support", "virtualization"]
 
 [features]
 default = []
