@@ -165,7 +165,8 @@ impl VhostUserMsg {
         }
 
         let to_send = std::mem::size_of::<VhostUserHeader>() + self.hdr.size as usize;
-        let data = unsafe { slice::from_raw_parts(std::ptr::addr_of!(self) as *const u8, to_send) };
+        let data =
+            unsafe { slice::from_raw_parts(self as *const VhostUserMsg as *const u8, to_send) };
 
         let mut sent: usize = 0;
 
@@ -226,7 +227,7 @@ impl VhostUserMsg {
 
         let header_buf = unsafe {
             slice::from_raw_parts_mut(
-                std::ptr::addr_of!(self.hdr) as *mut u8,
+                &self.hdr as *const VhostUserHeader as *mut u8,
                 std::mem::size_of::<VhostUserHeader>(),
             )
         };
@@ -251,9 +252,10 @@ impl VhostUserMsg {
             ));
         }
 
+        #[allow(unaligned_references)]
         let payload_buf = unsafe {
             slice::from_raw_parts_mut(
-                std::ptr::addr_of!(self.payload) as *mut u8,
+                &self.payload as *const VhostUserPayload as *mut u8,
                 self.hdr.size as usize,
             )
         };
