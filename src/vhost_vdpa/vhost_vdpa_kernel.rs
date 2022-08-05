@@ -105,7 +105,7 @@ impl VhostVdpaKernel {
         let backend_features = vdpa.get_backend_features()?;
         // We only need VHOST_BACKEND_F_IOTLB_MSG_V2 (if available) to support
         // dma_map/dma_unmap messages
-        vdpa.set_backend_features(backend_features & VHOST_BACKEND_F_IOTLB_MSG_V2)?;
+        vdpa.set_backend_features(backend_features & VHOST_BACKEND_F_IOTLB_MSG_V2 as u64)?;
 
         Ok(vdpa)
     }
@@ -308,10 +308,10 @@ impl VhostVdpaKernel {
             size,
             uaddr: uaddr as u64,
             perm: match readonly {
-                true => VHOST_ACCESS_RO,
-                false => VHOST_ACCESS_RW,
+                true => VHOST_ACCESS_RO as u8,
+                false => VHOST_ACCESS_RW as u8,
             },
-            type_: VHOST_IOTLB_UPDATE,
+            type_: VHOST_IOTLB_UPDATE as u8,
         };
 
         kuapi::send_iotlb_msg(
@@ -325,7 +325,7 @@ impl VhostVdpaKernel {
         let iotlb = vhost_iotlb_msg {
             iova,
             size,
-            type_: VHOST_IOTLB_INVALIDATE,
+            type_: VHOST_IOTLB_INVALIDATE as u8,
             ..Default::default()
         };
 
