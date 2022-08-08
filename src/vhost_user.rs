@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
+mod front_end;
+mod vhost_user_protocol;
+
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
 use crate::{ByteValued, EfdFlags, EventFd, VirtioTransport};
+use front_end::{VhostUserFrontEnd, VhostUserMemoryRegionInfo};
 use memfd::MemfdOptions;
 use memmap::MmapMut;
 use std::convert::{TryFrom, TryInto};
@@ -9,14 +13,11 @@ use std::fs::File;
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::rc::Rc;
-use vhost::vhost_user::message::{
-    VhostUserConfigFlags, VhostUserHeaderFlag, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+use vhost_user_protocol::{
+    VhostUserHeaderFlag, VhostUserMemoryRegion, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
-use vhost::vhost_user::{Master, VhostUserMaster};
-use vhost::{VhostBackend, VhostUserMemoryRegionInfo, VringConfigData};
-use vmm_sys_util::eventfd::EventFd as EventFdVmm;
 
 #[derive(Debug)]
 pub struct VhostUserError(Error);
@@ -27,17 +28,11 @@ impl From<Error> for VhostUserError {
     }
 }
 
-impl From<vhost::Error> for VhostUserError {
-    fn from(e: vhost::Error) -> Self {
-        VhostUserError(Error::new(ErrorKind::Other, e))
-    }
-}
-
 /// The transport to connect to a device using the vhost-user protocol.
 ///
 /// Type parameters `C` and `R` have the same meaning as in [`VirtioTransport`].
 pub struct VhostUser<C: ByteValued, R: Copy> {
-    vhost: Master,
+    vhost: VhostUserFrontEnd,
     features: u64,
     max_queues: usize,
     max_mem_regions: u64,
@@ -51,7 +46,7 @@ pub struct VhostUser<C: ByteValued, R: Copy> {
 
 impl<C: ByteValued, R: Copy> VhostUser<C, R> {
     fn connect(path: &str, virtio_features: u64) -> Result<Self, VhostUserError> {
-        let mut vhost = Master::connect(path, 0)?;
+        let mut vhost = VhostUserFrontEnd::new(path)?;
         vhost.set_owner()?;
 
         let mut features = vhost.get_features()?;
@@ -132,29 +127,19 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
         Self::connect(path, virtio_features).map_err(|e| e.0)
     }
 
-    fn setup_queue(&mut self, i: usize, q: &Virtqueue<R>) -> Result<(), vhost::Error> {
+    fn setup_queue(&mut self, i: usize, q: &Virtqueue<R>) -> Result<(), Error> {
         let vhost = &mut self.vhost;
-        vhost.set_vring_num(i, q.queue_size())?;
+        vhost.set_vring_num(i, q.queue_size().into())?;
         vhost.set_vring_base(i, 0)?;
         vhost.set_vring_addr(
             i,
-            &VringConfigData {
-                queue_max_size: q.queue_size(),
-                queue_size: q.queue_size(),
-                flags: 0,
-                desc_table_addr: q.desc_table_ptr() as u64,
-                avail_ring_addr: q.avail_ring_ptr() as u64,
-                used_ring_addr: q.used_ring_ptr() as u64,
-                log_addr: None,
-            },
+            q.desc_table_ptr() as u64,
+            q.used_ring_ptr() as u64,
+            q.avail_ring_ptr() as u64,
         )?;
 
-        vhost.set_vring_kick(i, unsafe {
-            &EventFdVmm::from_raw_fd(self.eventfd_kick[i].as_raw_fd())
-        })?;
-        vhost.set_vring_call(i, unsafe {
-            &EventFdVmm::from_raw_fd(self.eventfd_call[i].as_raw_fd())
-        })?;
+        vhost.set_vring_kick(i, self.eventfd_kick[i].as_raw_fd())?;
+        vhost.set_vring_call(i, self.eventfd_call[i].as_raw_fd())?;
         vhost.set_vring_enable(i, true)?;
         Ok(())
     }
@@ -210,11 +195,13 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
             .map_err(|_| Error::new(ErrorKind::InvalidInput, "Invalid fd_offset"))?;
 
         let region = VhostUserMemoryRegionInfo {
-            guest_phys_addr: addr as u64,
-            memory_size: len as u64,
-            userspace_addr: addr as u64,
-            mmap_offset,
-            mmap_handle: fd,
+            mr: VhostUserMemoryRegion {
+                guest_addr: addr as u64,
+                size: len as u64,
+                user_addr: addr as u64,
+                mmap_offset,
+            },
+            fd,
         };
 
         self.vhost
@@ -227,7 +214,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
 
     fn unmap_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error> {
         for (i, region) in self.mem_table.iter().enumerate() {
-            if region.userspace_addr == addr as u64 && region.memory_size == len as u64 {
+            if region.mr.user_addr == addr as u64 && region.mr.size == len as u64 {
                 self.vhost
                     .remove_mem_region(region)
                     .map_err(|e| Error::new(ErrorKind::Other, e))?;
@@ -266,13 +253,12 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
 
     fn get_config(&mut self) -> Result<C, Error> {
         let cfg_size: usize = mem::size_of::<C>();
-        let buf = vec![0u8; cfg_size];
-        let (_cfg, cfg_payload) = self
-            .vhost
-            .get_config(0, cfg_size as u32, VhostUserConfigFlags::empty(), &buf)
+        let mut buf = vec![0u8; cfg_size];
+        self.vhost
+            .get_config(0, 0, &mut buf)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
-        Ok(*C::from_slice(&cfg_payload).unwrap())
+        Ok(*C::from_slice(&buf).unwrap())
     }
 
     fn get_submission_fd(&self, queue_idx: usize) -> Rc<EventFd> {

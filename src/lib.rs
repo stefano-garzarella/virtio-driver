@@ -20,6 +20,7 @@ mod vhost_vdpa;
 pub use util::bytevalued::*;
 pub use util::endian::*;
 pub use util::eventfd::*;
+pub use util::sock_ctrl_msg::*;
 
 #[cfg(feature = "vhost-user")]
 pub use vhost_user::VhostUser;
