@@ -6,21 +6,17 @@
 use bitflags::bitflags;
 use std::io::Error;
 
+mod devices;
 mod transports;
 mod util;
-mod virtio_blk;
 pub mod virtqueue;
 
+pub use devices::*;
 pub use transports::*;
 pub use util::bytevalued::*;
 pub use util::endian::*;
 pub use util::eventfd::*;
 pub use util::sock_ctrl_msg::*;
-
-pub use virtio_blk::{
-    validate_lba, VirtioBlkConfig, VirtioBlkFeatureFlags, VirtioBlkQueue, VirtioBlkReqBuf,
-    VirtioBlkTransport,
-};
 
 bitflags! {
     pub struct VirtioFeatureFlags: u64 {
