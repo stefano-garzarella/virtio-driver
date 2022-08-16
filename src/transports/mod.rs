@@ -18,6 +18,22 @@ use crate::util::bytevalued::ByteValued;
 use crate::util::eventfd::EventFd;
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
 
+/// Wraps a `u64` representing an IOVA.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Iova(pub u64);
+
+/// Something that can translate process addresses into IOVAs.
+pub trait IovaTranslator: Send + Sync {
+    /// Determines the base IOVA corresponding to the given process address range.
+    ///
+    /// If the transport requires memory to be mapped prior to use but the address doesn't belong to
+    /// a mapped memory region, an `Err` will be returned.
+    ///
+    /// The `addr..addr + len` range must not cross memory region boundaries, otherwise `Err` is
+    /// returned.
+    fn translate_addr(&self, addr: usize, len: usize) -> Result<Iova, Error>;
+}
+
 /// An interface to the virtio transport/bus of a device
 ///
 /// Type parameters:
@@ -40,6 +56,8 @@ pub trait VirtioTransport<C: ByteValued, R: Copy> {
 
     /// Maps a memory region with the transport.
     ///
+    /// Returns the IOVA corresponding to the start of the memory region.
+    ///
     /// Requests to the device may only refer to memory that is in a mapped memory region.
     fn map_mem_region(
         &mut self,
@@ -47,10 +65,13 @@ pub trait VirtioTransport<C: ByteValued, R: Copy> {
         len: usize,
         fd: RawFd,
         fd_offset: i64,
-    ) -> Result<(), Error>;
+    ) -> Result<Iova, Error>;
 
     /// Unmaps a memory region from the transport.
     fn unmap_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error>;
+
+    /// Returns a value that can translate process addresses into IOVAs.
+    fn iova_translator(&self) -> Box<dyn IovaTranslator>;
 
     /// Initialises and enables the passed queues on the transport level.
     fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error>;

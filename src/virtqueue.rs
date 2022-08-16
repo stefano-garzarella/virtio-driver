@@ -2,7 +2,7 @@
 
 //! A virtqueue implementation to be used internally by virtio device drivers.
 
-use crate::{Le16, Le32, Le64};
+use crate::{Iova, IovaTranslator, Le16, Le32, Le64};
 use bitflags::bitflags;
 use libc::iovec;
 use std::io::{Error, ErrorKind};
@@ -173,6 +173,7 @@ impl<'a, T: Clone> VirtqueueRing<'a, T> {
 /// in memory shared with the device and is copied on completion. Don't put things there that the
 /// device doesn't have to access, in the interest of both security and performance.
 pub struct Virtqueue<'a, R: Copy> {
+    iova_translator: Box<dyn IovaTranslator>,
     queue_size: u16,
     avail: VirtqueueRing<'a, Le16>,
     used: VirtqueueRing<'a, VirtqueueUsedElem>,
@@ -199,7 +200,11 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
     ///
     /// `buf` has to be memory that is visible for the device. It is used to store all descriptors,
     /// rings and device-specific per-request data for the queue.
-    pub fn new(buf: &'a mut [u8], queue_size: u16) -> Result<Self, Error> {
+    pub fn new(
+        iova_translator: Box<dyn IovaTranslator>,
+        buf: &'a mut [u8],
+        queue_size: u16,
+    ) -> Result<Self, Error> {
         let layout = VirtqueueLayout::new::<R>(1, queue_size as usize)?;
         let mem = buf
             .get_mut(0..layout.end_offset)
@@ -232,6 +237,7 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
         }
 
         Ok(Virtqueue {
+            iova_translator,
             queue_size,
             desc,
             avail,
@@ -276,9 +282,13 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
             return Err(Error::new(ErrorKind::Other, "Not enough free descriptors"));
         }
 
+        let Iova(iova) = self
+            .iova_translator
+            .translate_addr(iovec.iov_base as usize, iovec.iov_len)?;
+
         let next_free_desc = self.desc[idx as usize].next;
         self.desc[idx as usize] = VirtqueueDescriptor {
-            addr: (iovec.iov_base as u64).into(),
+            addr: iova.into(),
             len: (iovec.iov_len as u32).into(),
             flags: flags.bits().into(),
             next: next_free_desc,

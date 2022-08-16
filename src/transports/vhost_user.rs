@@ -4,7 +4,7 @@ mod front_end;
 mod vhost_user_protocol;
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-use crate::{ByteValued, EfdFlags, EventFd, QueueNotifier, VirtioTransport};
+use crate::{ByteValued, EfdFlags, EventFd, Iova, IovaTranslator, QueueNotifier, VirtioTransport};
 use front_end::{VhostUserFrontEnd, VhostUserMemoryRegionInfo};
 use memfd::MemfdOptions;
 use memmap::MmapMut;
@@ -118,9 +118,12 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
     /// # Examples
     ///
     /// ```no_run
-    /// # use virtio_driver::{VhostUser, VirtioBlkQueue, VirtioFeatureFlags};
+    /// # use virtio_driver::{VhostUser, VirtioBlkQueue, VirtioBlkTransport, VirtioFeatureFlags};
+    /// use std::sync::{Arc, RwLock};
+    ///
     /// let mut vhost = VhostUser::new("/tmp/vhost.sock", VirtioFeatureFlags::VERSION_1.bits())?;
-    /// let mut queues = VirtioBlkQueue::<()>::setup_queues(&mut vhost, 1, 128);
+    /// let mut vhost = Arc::new(RwLock::new(Box::new(vhost) as Box<VirtioBlkTransport>));
+    /// let mut queues = VirtioBlkQueue::<()>::setup_queues(&vhost, 1, 128);
     /// # Result::<(), Box<dyn std::error::Error>>::Ok(())
     /// ```
     pub fn new(path: &str, virtio_features: u64) -> Result<Self, Error> {
@@ -190,7 +193,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
         len: usize,
         fd: RawFd,
         fd_offset: i64,
-    ) -> Result<(), Error> {
+    ) -> Result<Iova, Error> {
         let mmap_offset = u64::try_from(fd_offset)
             .map_err(|_| Error::new(ErrorKind::InvalidInput, "Invalid fd_offset"))?;
 
@@ -209,7 +212,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
         self.mem_table.push(region);
-        Ok(())
+        Ok(Iova(addr as u64))
     }
 
     fn unmap_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error> {
@@ -226,6 +229,19 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
             ErrorKind::InvalidInput,
             "Memory region not found",
         ))
+    }
+
+    fn iova_translator(&self) -> Box<dyn IovaTranslator> {
+        #[derive(Clone)]
+        struct VhostUserIovaTranslator;
+
+        impl IovaTranslator for VhostUserIovaTranslator {
+            fn translate_addr(&self, addr: usize, _len: usize) -> Result<Iova, Error> {
+                Ok(Iova(addr as u64))
+            }
+        }
+
+        Box::new(VhostUserIovaTranslator)
     }
 
     fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {

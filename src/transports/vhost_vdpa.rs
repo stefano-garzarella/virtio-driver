@@ -4,7 +4,10 @@ mod vhost_bindings;
 mod vhost_vdpa_kernel;
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-use crate::{ByteValued, EfdFlags, EventFd, QueueNotifier, VirtioFeatureFlags, VirtioTransport};
+use crate::{
+    ByteValued, EfdFlags, EventFd, Iova, IovaTranslator, QueueNotifier, VirtioFeatureFlags,
+    VirtioTransport,
+};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
@@ -147,11 +150,11 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         len: usize,
         _fd: RawFd,
         _fd_offset: i64,
-    ) -> Result<(), Error> {
+    ) -> Result<Iova, Error> {
         self.vdpa
             .dma_map(addr as u64, len as u64, addr as *const u8, false)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
-        Ok(())
+        Ok(Iova(addr as u64))
     }
 
     fn unmap_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error> {
@@ -159,6 +162,19 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
             .dma_unmap(addr as u64, len as u64)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
         Ok(())
+    }
+
+    fn iova_translator(&self) -> Box<dyn IovaTranslator> {
+        #[derive(Clone)]
+        struct VhostVdpaIovaTranslator;
+
+        impl IovaTranslator for VhostVdpaIovaTranslator {
+            fn translate_addr(&self, addr: usize, _len: usize) -> Result<Iova, Error> {
+                Ok(Iova(addr as u64))
+            }
+        }
+
+        Box::new(VhostVdpaIovaTranslator)
     }
 
     fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {

@@ -170,27 +170,31 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 /// # Examples
 ///
 /// ```no_run
-/// # use virtio_driver::{VhostUser, VirtioBlkQueue, VirtioFeatureFlags, VirtioTransport};
+/// # use virtio_driver::{
+/// #     VhostUser, VirtioBlkQueue, VirtioBlkTransport, VirtioFeatureFlags, VirtioTransport
+/// # };
 /// use std::os::unix::io::AsRawFd;
+/// use std::sync::{Arc, RwLock};
 ///
 /// // Connect to the vhost-user socket and create the queues
 /// let mut vhost = VhostUser::new("/tmp/vhost.sock", VirtioFeatureFlags::VERSION_1.bits())?;
-/// let mut queues = VirtioBlkQueue::<&'static str>::setup_queues(&mut vhost, 1, 128)?;
+/// let mut vhost = Arc::new(RwLock::new(Box::new(vhost) as Box<VirtioBlkTransport>));
+/// let mut queues = VirtioBlkQueue::<&'static str>::setup_queues(&vhost, 1, 128)?;
 ///
 /// // Create shared memory that is visible for the device
 /// let mem_file = memfd::MemfdOptions::new().create("guest-ram")?.into_file();
 /// mem_file.set_len(512)?;
 /// let mut mem = unsafe { memmap::MmapMut::map_mut(&mem_file) }?;
-/// vhost.map_mem_region(mem.as_ptr() as usize, 512, mem_file.as_raw_fd(), 0)?;
+/// vhost.write().unwrap().map_mem_region(mem.as_ptr() as usize, 512, mem_file.as_raw_fd(), 0)?;
 ///
 /// // Submit a request
 /// queues[0].read(0, &mut mem, "my-request-context")?;
-/// vhost.get_submission_notifier(0).notify()?;
+/// vhost.read().unwrap().get_submission_notifier(0).notify()?;
 ///
 /// // Wait for its completion
 /// let mut done = false;
 /// while !done {
-///     let ret = vhost.get_completion_fd(0).read();
+///     let ret = vhost.read().unwrap().get_completion_fd(0).read();
 ///     if ret.is_err() {
 ///         continue;
 ///     }
@@ -232,16 +236,25 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
 
         let layout = VirtqueueLayout::new::<VirtioBlkReqBuf>(num_queues, queue_size as usize)?;
         let queues: Vec<_> = {
+            // Not actually needless: must drop the borrow on the transport before alloc_queue_mem()
+            #[allow(clippy::needless_collect)]
+            let iova_translators: Vec<_> = iter::repeat_with(|| transport.iova_translator())
+                .take(num_queues)
+                .collect();
+
             let mem = transport.alloc_queue_mem(&layout)?;
-            (0..num_queues)
-                .map(|i| {
+
+            iova_translators
+                .into_iter()
+                .enumerate()
+                .map(|(i, iova_translator)| {
                     let mem_queue = unsafe {
                         std::slice::from_raw_parts_mut(
                             &mut mem[i * layout.end_offset] as *mut u8,
                             layout.end_offset,
                         )
                     };
-                    Virtqueue::new(mem_queue, queue_size)
+                    Virtqueue::new(iova_translator, mem_queue, queue_size)
                 })
                 .collect::<Result<_, _>>()?
         };
