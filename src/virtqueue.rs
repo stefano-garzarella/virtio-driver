@@ -72,12 +72,16 @@ impl VirtqueueLayout {
         let req_offset = desc_bytes + avail_bytes + used_bytes;
         let req_offset_aligned = (req_offset + req_align - 1) & !(req_align - 1);
 
+        // Maintain 16-byte descriptor table alignment (see 2.7 in the VIRTIO 1.1 spec) in
+        // contiguous virtqueue arrays (useful for allocating memory for several queues at once)
+        let end_offset = (req_offset_aligned + req_bytes + 15) & !15;
+
         Ok(VirtqueueLayout {
             num_queues,
             avail_offset: desc_bytes,
             used_offset: desc_bytes + avail_bytes,
             req_offset: req_offset_aligned,
-            end_offset: req_offset_aligned + req_bytes,
+            end_offset,
         })
     }
 }
