@@ -186,6 +186,10 @@ pub struct Virtqueue<'a, R: Copy> {
     first_free_desc: u16,
 }
 
+// `Send` and `Sync` are not implemented automatically due to the `avail`, `used`, and `req` fields.
+unsafe impl<R: Copy> Send for Virtqueue<'_, R> {}
+unsafe impl<R: Copy> Sync for Virtqueue<'_, R> {}
+
 /// The result of a completed request
 pub struct VirtqueueCompletion<R> {
     /// The index of the first descriptor of the request as returned by [`add_request`].

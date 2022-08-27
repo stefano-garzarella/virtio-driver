@@ -41,6 +41,10 @@ pub struct VhostVdpa<C: ByteValued, R: Copy> {
     phantom: PhantomData<(C, R)>,
 }
 
+// `Send` and `Sync` are not implemented automatically due to the `memory` and `phantom` fields.
+unsafe impl<C: ByteValued, R: Copy> Send for VhostVdpa<C, R> {}
+unsafe impl<C: ByteValued, R: Copy> Sync for VhostVdpa<C, R> {}
+
 impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
     pub fn new(path: &str, virtio_features: u64) -> Result<Self, VhostVdpaBlkError> {
         let mut vdpa = VhostVdpaKernel::new(path)?;

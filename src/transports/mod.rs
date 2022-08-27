@@ -44,7 +44,7 @@ pub trait IovaTranslator: Send + Sync {
 /// - `C` represents the device configuration space, as returned by [`VirtioTransport::get_config`];
 /// - `R` has the same meaning as in [`Virtqueue`], and is used to store device-specific per-request
 ///   data.
-pub trait VirtioTransport<C: ByteValued, R: Copy> {
+pub trait VirtioTransport<C: ByteValued, R: Copy>: Send + Sync {
     /// Returns the maximum number of queues supported by the device.
     fn max_queues(&self) -> usize;
 
@@ -97,7 +97,7 @@ pub trait VirtioTransport<C: ByteValued, R: Copy> {
 }
 
 /// A trait for types that can be used to submit available buffer notifications to a queue.
-pub trait QueueNotifier {
+pub trait QueueNotifier: Send + Sync {
     /// Trigger an available buffer notification.
     fn notify(&self) -> Result<(), Error>;
 }

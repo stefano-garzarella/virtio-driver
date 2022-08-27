@@ -280,6 +280,11 @@ pub struct Pci<C: ByteValued, R: Copy> {
     phantom: PhantomData<(C, R)>,
 }
 
+// `Send` and `Sync` are not implemented automatically due to the pointer in `queue_memory` and the
+// `phantom` field.
+unsafe impl<C: ByteValued, R: Copy> Send for Pci<C, R> {}
+unsafe impl<C: ByteValued, R: Copy> Sync for Pci<C, R> {}
+
 impl<C: ByteValued, R: Copy> Pci<C, R> {
     /// `driver_features` will be OR'd with VIRTIO_F_VERSION_1, VIRTIO_F_ACCESS_PLATFORM, and
     /// VIRTIO_F_ORDER_PLATFORM.

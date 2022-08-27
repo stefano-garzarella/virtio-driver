@@ -44,6 +44,10 @@ pub struct VhostUser<C: ByteValued, R: Copy> {
     phantom: PhantomData<(C, R)>,
 }
 
+// `Send` and `Sync` are not implemented automatically due to the `phantom` field.
+unsafe impl<C: ByteValued, R: Copy> Send for VhostUser<C, R> {}
+unsafe impl<C: ByteValued, R: Copy> Sync for VhostUser<C, R> {}
+
 impl<C: ByteValued, R: Copy> VhostUser<C, R> {
     fn connect(path: &str, virtio_features: u64) -> Result<Self, VhostUserError> {
         let mut vhost = VhostUserFrontEnd::new(path)?;
