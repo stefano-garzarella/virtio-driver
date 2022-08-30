@@ -480,6 +480,12 @@ pub struct CompletionIter<'a, 'queue, C> {
     req_contexts: &'a mut Box<[Option<C>]>,
 }
 
+impl<C> CompletionIter<'_, '_, C> {
+    pub fn has_next(&self) -> bool {
+        self.it.has_next()
+    }
+}
+
 impl<'queue, C> Iterator for CompletionIter<'_, 'queue, C> {
     type Item = Completion<C>;
 

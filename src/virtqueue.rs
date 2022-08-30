@@ -133,10 +133,13 @@ impl<'a, T: Clone> VirtqueueRing<'a, T> {
         self.next_idx += Wrapping(1);
     }
 
-    fn pop(&mut self) -> Option<T> {
+    fn has_next(&self) -> bool {
         let remote_next_idx = self.load_next_idx();
+        remote_next_idx != self.next_idx.0
+    }
 
-        if remote_next_idx != self.next_idx.0 {
+    fn pop(&mut self) -> Option<T> {
+        if self.has_next() {
             let result = unsafe { (*self.ptr).ring[self.ring_idx()].clone() };
             self.next_idx += Wrapping(1);
             Some(result)
@@ -350,6 +353,12 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
 /// An iterator that returns all completed requests.
 pub struct VirtqueueIter<'a, 'queue, R: Copy> {
     virtqueue: &'a mut Virtqueue<'queue, R>,
+}
+
+impl<R: Copy> VirtqueueIter<'_, '_, R> {
+    pub fn has_next(&self) -> bool {
+        self.virtqueue.used.has_next()
+    }
 }
 
 impl<'a, 'queue, R: Copy> Iterator for VirtqueueIter<'a, 'queue, R> {
