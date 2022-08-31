@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: (MIT OR Apache-2.0)
 
 //! Partial implementation of vhost-user front-end side
 //! https://qemu.readthedocs.io/en/latest/interop/vhost-user.html#front-end-message-types

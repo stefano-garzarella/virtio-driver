@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: (MIT OR Apache-2.0)
 
 mod vhost_bindings;
 mod vhost_vdpa_kernel;

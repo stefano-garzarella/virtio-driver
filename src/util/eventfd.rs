@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: (MIT OR Apache-2.0)
 
 use nix::sys::eventfd::eventfd;
 pub use nix::sys::eventfd::EfdFlags;

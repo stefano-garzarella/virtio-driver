@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: (MIT OR Apache-2.0)
 
 //! Structures and constants defined by vhost-user protocol
 //! https://qemu.readthedocs.io/en/latest/interop/vhost-user.html

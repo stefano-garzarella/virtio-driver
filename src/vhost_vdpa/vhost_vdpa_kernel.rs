@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: (MIT OR Apache-2.0)
 
 use super::vhost_bindings::{
     vhost_iotlb_msg, vhost_vdpa_config, vhost_vring_addr, vhost_vring_file, vhost_vring_state,
