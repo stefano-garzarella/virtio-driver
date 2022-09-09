@@ -59,7 +59,7 @@ pub trait VirtioTransport<C: ByteValued, R: Copy> {
     fn get_features(&self) -> u64;
 
     /// Queries the device configuration.
-    fn get_config(&mut self) -> Result<C, Error>;
+    fn get_config(&self) -> Result<C, Error>;
 
     /// Returns an [`EventFd`] that can be written to notify the device of new requests in the
     /// queue.

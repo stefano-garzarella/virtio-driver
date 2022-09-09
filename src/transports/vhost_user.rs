@@ -251,7 +251,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
         self.features
     }
 
-    fn get_config(&mut self) -> Result<C, Error> {
+    fn get_config(&self) -> Result<C, Error> {
         let cfg_size: usize = mem::size_of::<C>();
         let mut buf = vec![0u8; cfg_size];
         self.vhost
