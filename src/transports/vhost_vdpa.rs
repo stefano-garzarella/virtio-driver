@@ -10,7 +10,7 @@ use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::rc::Rc;
+use std::sync::Arc;
 use vhost_vdpa_kernel::VhostVdpaKernel;
 use virtio_bindings::bindings::virtio_blk::*;
 
@@ -31,8 +31,8 @@ pub struct VhostVdpa<C: ByteValued, R: Copy> {
     max_mem_regions: u64,
     memory: *mut u8,
     layout: Option<Layout>,
-    eventfd_kick: Vec<Rc<EventFd>>,
-    eventfd_call: Vec<Rc<EventFd>>,
+    eventfd_kick: Vec<Arc<EventFd>>,
+    eventfd_call: Vec<Arc<EventFd>>,
     phantom: PhantomData<(C, R)>,
 }
 
@@ -164,9 +164,9 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
     fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
         for (i, q) in queues.iter().enumerate() {
             self.eventfd_kick
-                .push(Rc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
+                .push(Arc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
             self.eventfd_call
-                .push(Rc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
+                .push(Arc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
             self.setup_queue(i, q)
                 .map_err(|e| Error::new(ErrorKind::Other, e))?;
         }
@@ -189,11 +189,11 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         Ok(*C::from_slice(&buf).unwrap())
     }
 
-    fn get_submission_fd(&self, queue_idx: usize) -> Rc<EventFd> {
-        Rc::clone(&self.eventfd_kick[queue_idx])
+    fn get_submission_fd(&self, queue_idx: usize) -> Arc<EventFd> {
+        Arc::clone(&self.eventfd_kick[queue_idx])
     }
 
-    fn get_completion_fd(&self, queue_idx: usize) -> Rc<EventFd> {
-        Rc::clone(&self.eventfd_call[queue_idx])
+    fn get_completion_fd(&self, queue_idx: usize) -> Arc<EventFd> {
+        Arc::clone(&self.eventfd_call[queue_idx])
     }
 }

@@ -2,7 +2,7 @@
 
 use std::io::Error;
 use std::os::unix::io::RawFd;
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[cfg(feature = "vhost-user")]
 mod vhost_user;
@@ -63,8 +63,8 @@ pub trait VirtioTransport<C: ByteValued, R: Copy> {
 
     /// Returns an [`EventFd`] that can be written to notify the device of new requests in the
     /// queue.
-    fn get_submission_fd(&self, queue_idx: usize) -> Rc<EventFd>;
+    fn get_submission_fd(&self, queue_idx: usize) -> Arc<EventFd>;
 
     /// Returns an [`EventFd`] that can be read to be notified of request completions in the queue.
-    fn get_completion_fd(&self, queue_idx: usize) -> Rc<EventFd>;
+    fn get_completion_fd(&self, queue_idx: usize) -> Arc<EventFd>;
 }
