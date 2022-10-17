@@ -72,6 +72,8 @@ pub trait VirtioTransport<C: ByteValued, R: Copy> {
     ) -> Result<Iova, Error>;
 
     /// Unmaps a memory region from the transport.
+    ///
+    /// Note that mapped regions are implicitly unmapped when the transport is dropped.
     fn unmap_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error>;
 
     /// Returns a value that can translate process addresses into IOVAs.
