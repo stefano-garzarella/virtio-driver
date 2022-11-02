@@ -8,7 +8,9 @@ use crate::{
     ByteValued, EfdFlags, EventFd, Iova, IovaTranslator, QueueNotifier, VirtioFeatureFlags,
     VirtioTransport,
 };
-use std::alloc::{alloc_zeroed, dealloc, Layout};
+use memfd::MemfdOptions;
+use memmap::MmapMut;
+use std::fs::File;
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
@@ -32,8 +34,8 @@ pub struct VhostVdpa<C: ByteValued, R: Copy> {
     features: u64,
     max_queues: usize,
     max_mem_regions: u64,
-    memory: *mut u8,
-    layout: Option<Layout>,
+    virtqueue_mem_file: File,
+    mmap: Option<MmapMut>,
     eventfd_kick: Vec<Arc<EventFd>>,
     eventfd_call: Vec<Arc<EventFd>>,
     phantom: PhantomData<(C, R)>,
@@ -54,6 +56,11 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
 
         vdpa.add_status(VIRTIO_CONFIG_S_FEATURES_OK as u8)?;
 
+        let memfd = MemfdOptions::new()
+            .create("virtio-ring")
+            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+        let virtqueue_mem_file = memfd.into_file();
+
         //TODO: VHOST_VDPA_GET_VQS_COUNT support (we need to update the vhost crate)
         let max_queues = u16::MAX as usize;
         let max_mem_regions = u64::MAX;
@@ -63,8 +70,8 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
             features,
             max_queues,
             max_mem_regions,
-            layout: None,
-            memory: std::ptr::null_mut::<u8>(),
+            virtqueue_mem_file,
+            mmap: None,
             eventfd_kick: Vec::new(),
             eventfd_call: Vec::new(),
             phantom: PhantomData,
@@ -94,20 +101,6 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
     }
 }
 
-impl<C: ByteValued, R: Copy> Drop for VhostVdpa<C, R> {
-    fn drop(&mut self) {
-        if self.layout.is_some() {
-            let layout = self.layout.unwrap();
-
-            self.vdpa
-                .dma_unmap(self.memory as u64, layout.size() as u64)
-                .unwrap();
-
-            unsafe { dealloc(self.memory, layout) };
-        }
-    }
-}
-
 impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
     fn max_queues(&self) -> usize {
         self.max_queues
@@ -117,31 +110,37 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         self.max_mem_regions
     }
 
-    fn alloc_queue_mem(&mut self, vq_layout: &VirtqueueLayout) -> Result<&mut [u8], Error> {
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+    fn alloc_queue_mem(&mut self, layout: &VirtqueueLayout) -> Result<&mut [u8], Error> {
+        // VDUSE requires that memory should be allocated with an associated fd,
+        // so we use the same approach as vhost-user, allocating the virtqueues
+        // memory through a memory mapped anonymous file.
 
-        /* allocate vq and requests memory aligned to page size to do a single
-         * dma_map() for this regions accessed by the device
-         */
-        let layout = Layout::from_size_align(vq_layout.end_offset, page_size).unwrap();
-        let memory = unsafe { alloc_zeroed(layout) };
+        if self.mmap.is_some() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Memory is already allocated",
+            ));
+        }
 
-        let vq_mem: &mut [u8] =
-            unsafe { std::slice::from_raw_parts_mut(memory, vq_layout.end_offset) };
+        // TODO This assumes that all virtqueues have the same queue_size
+        self.virtqueue_mem_file.set_len(
+            layout
+                .num_queues
+                .checked_mul(layout.end_offset)
+                .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Queue is too large"))?
+                as u64,
+        )?;
 
-        self.memory = memory;
-        self.layout = Some(layout);
+        let mmap = unsafe { MmapMut::map_mut(&self.virtqueue_mem_file) }?;
+        self.map_mem_region(
+            mmap.as_ptr() as usize,
+            mmap.len(),
+            self.virtqueue_mem_file.as_raw_fd(),
+            0,
+        )?;
 
-        self.vdpa
-            .dma_map(
-                self.memory as u64,
-                layout.size() as u64,
-                self.memory as *const u8,
-                false,
-            )
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
-
-        Ok(vq_mem)
+        self.mmap = Some(mmap);
+        Ok(self.mmap.as_mut().unwrap().as_mut())
     }
 
     fn map_mem_region(
@@ -151,6 +150,11 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         _fd: RawFd,
         _fd_offset: i64,
     ) -> Result<Iova, Error> {
+        // `_fd` is not used here because the vhost-vdpa kernel module retrieves
+        // the fd associated with the VA directly into the kernel, so there is
+        // no need to pass it to the call.
+        // This is needed only when the vDPA device uses VA and requires an
+        // associated fd (e.g. VDUSE devices).
         self.vdpa
             .dma_map(addr as u64, len as u64, addr as *const u8, false)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
