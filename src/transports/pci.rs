@@ -616,8 +616,22 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
     }
 
     fn unmap_mem_region(&mut self, addr: usize, len: usize) -> io::Result<()> {
-        self.device.iommu().unmap(addr as u64, len)?;
-        self.iova_space.write().unwrap().free(addr, len);
+        let mut iova_space = self.iova_space.write().unwrap();
+
+        let Iova(iova) = iova_space.translate(addr, len).ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "Address range [{:#x}, {:#x}) is not mapped",
+                    addr,
+                    addr + len
+                ),
+            )
+        })?;
+
+        self.device.iommu().unmap(iova, len)?;
+        iova_space.free(addr, len);
+
         Ok(())
     }
 
