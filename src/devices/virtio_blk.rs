@@ -81,12 +81,22 @@ struct DiscardWriteZeroesData {
     flags: Le32,
 }
 
+bitflags! {
+    pub struct DiscardWriteZeroesFlags: u32 {
+        const UNMAP = 1 << 0;
+    }
+}
+
 impl DiscardWriteZeroesData {
     fn new(offset: u64, len: u64, unmap: bool) -> Result<Self, Error> {
         let start = to_lba(offset)?;
         let num_sectors = u32::try_from(to_lba(len)?)
             .map_err(|_e| Error::new(ErrorKind::InvalidInput, "Discard length too large"))?;
-        let flags = if unmap { 1 } else { 0 };
+        let flags = if unmap {
+            DiscardWriteZeroesFlags::UNMAP.bits()
+        } else {
+            0
+        };
 
         Ok(DiscardWriteZeroesData {
             sector: start.into(),
