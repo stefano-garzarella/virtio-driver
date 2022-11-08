@@ -18,6 +18,9 @@ pub use util::endian::*;
 pub use util::eventfd::*;
 pub use util::sock_ctrl_msg::*;
 
+// Reexport `iovec` since it appear in public APIs.
+pub use nix::libc::iovec;
+
 bitflags! {
     pub struct VirtioFeatureFlags: u64 {
         const RING_INDIRECT_DESC = 1 << 28;

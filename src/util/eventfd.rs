@@ -13,7 +13,8 @@ pub struct EventFd {
 }
 
 impl EventFd {
-    pub fn new(flags: EfdFlags) -> Result<Self, Error> {
+    #[allow(dead_code)] // unused when virtio-driver is build with no features enabled
+    pub(crate) fn new(flags: EfdFlags) -> Result<Self, Error> {
         let fd = eventfd(0, flags)?;
         let file = unsafe { File::from_raw_fd(fd) };
 
