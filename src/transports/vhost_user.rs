@@ -6,14 +6,15 @@ mod vhost_user_protocol;
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
 use crate::{ByteValued, EfdFlags, EventFd, Iova, IovaTranslator, QueueNotifier, VirtioTransport};
 use front_end::{VhostUserFrontEnd, VhostUserMemoryRegionInfo};
-use memfd::MemfdOptions;
 use memmap::MmapMut;
+use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
 use std::convert::{TryFrom, TryInto};
+use std::ffi::CStr;
 use std::fs::File;
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::Arc;
 use vhost_user_protocol::{
     VhostUserHeaderFlag, VhostUserMemoryRegion, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -90,10 +91,12 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
         };
         let max_mem_regions = vhost.get_max_mem_slots()?;
 
-        let memfd = MemfdOptions::new()
-            .create("virtio-ring")
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
-        let virtqueue_mem_file = memfd.into_file();
+        let virtqueue_mem_file = {
+            let name = CStr::from_bytes_with_nul(b"virtio-ring\0").unwrap();
+            let fd = memfd_create(name, MemFdCreateFlag::empty())
+                .map_err(|e| Error::from_raw_os_error(e as i32))?;
+            unsafe { File::from_raw_fd(fd) }
+        };
 
         let vu = VhostUser {
             vhost,

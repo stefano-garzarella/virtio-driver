@@ -183,7 +183,10 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 /// # use virtio_driver::{
 /// #     VhostUser, VirtioBlkQueue, VirtioBlkTransport, VirtioFeatureFlags, VirtioTransport
 /// # };
-/// use std::os::unix::io::AsRawFd;
+/// use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
+/// use std::ffi::CStr;
+/// use std::fs::File;
+/// use std::os::unix::io::{AsRawFd, FromRawFd};
 /// use std::sync::{Arc, RwLock};
 ///
 /// // Connect to the vhost-user socket and create the queues
@@ -192,7 +195,11 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 /// let mut queues = VirtioBlkQueue::<&'static str>::setup_queues(&vhost, 1, 128)?;
 ///
 /// // Create shared memory that is visible for the device
-/// let mem_file = memfd::MemfdOptions::new().create("guest-ram")?.into_file();
+/// let mem_file = {
+///     let name = CStr::from_bytes_with_nul(b"guest-ram\0").unwrap();
+///     let fd = memfd_create(name, MemFdCreateFlag::empty())?;
+///     unsafe { File::from_raw_fd(fd) }
+/// };
 /// mem_file.set_len(512)?;
 /// let mut mem = unsafe { memmap::MmapMut::map_mut(&mem_file) }?;
 /// vhost.write().unwrap().map_mem_region(mem.as_ptr() as usize, 512, mem_file.as_raw_fd(), 0)?;

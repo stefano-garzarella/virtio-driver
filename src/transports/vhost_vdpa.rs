@@ -8,13 +8,14 @@ use crate::{
     ByteValued, EfdFlags, EventFd, Iova, IovaTranslator, QueueNotifier, VirtioFeatureFlags,
     VirtioTransport,
 };
-use memfd::MemfdOptions;
 use memmap::MmapMut;
+use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
+use std::ffi::CStr;
 use std::fs::File;
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::Arc;
 use vhost_vdpa_kernel::VhostVdpaKernel;
 use virtio_bindings::bindings::virtio_blk::*;
@@ -60,10 +61,12 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
 
         vdpa.add_status(VIRTIO_CONFIG_S_FEATURES_OK as u8)?;
 
-        let memfd = MemfdOptions::new()
-            .create("virtio-ring")
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
-        let virtqueue_mem_file = memfd.into_file();
+        let virtqueue_mem_file = {
+            let name = CStr::from_bytes_with_nul(b"virtio-ring\0").unwrap();
+            let fd = memfd_create(name, MemFdCreateFlag::empty())
+                .map_err(|e| Error::from_raw_os_error(e as i32))?;
+            unsafe { File::from_raw_fd(fd) }
+        };
 
         //TODO: VHOST_VDPA_GET_VQS_COUNT support (we need to update the vhost crate)
         let max_queues = u16::MAX as usize;
