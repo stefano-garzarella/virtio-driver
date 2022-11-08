@@ -94,7 +94,7 @@ impl VhostVdpaKernel {
     pub fn new(path: &str) -> Result<Self, Error> {
         let mut vdpa = VhostVdpaKernel {
             backend: OpenOptions::new()
-                .custom_flags(libc::O_CLOEXEC)
+                .custom_flags(nix::libc::O_CLOEXEC)
                 .write(true)
                 .open(path)?,
             backend_features_acked: 0,

@@ -4,7 +4,7 @@
 
 use crate::{Iova, IovaTranslator, Le16, Le32, Le64};
 use bitflags::bitflags;
-use libc::iovec;
+use nix::libc::iovec;
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;

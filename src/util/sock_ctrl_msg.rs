@@ -17,7 +17,7 @@ use std::os::unix::net::{UnixDatagram, UnixStream};
 use std::ptr::{copy_nonoverlapping, null_mut, write_unaligned};
 use std::slice;
 
-use libc::{
+use nix::libc::{
     c_long, c_void, cmsghdr, iovec, msghdr, recvmsg, sendmsg, MSG_NOSIGNAL, SCM_RIGHTS, SOL_SOCKET,
 };
 
@@ -355,7 +355,7 @@ mod tests {
     use std::os::unix::net::UnixDatagram;
     use std::slice::from_raw_parts;
 
-    use libc::cmsghdr;
+    use nix::libc::cmsghdr;
 
     use crate::{EfdFlags, EventFd};
 

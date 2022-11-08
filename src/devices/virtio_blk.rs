@@ -3,7 +3,7 @@
 use crate::virtqueue::{Virtqueue, VirtqueueIter, VirtqueueLayout};
 use crate::{ByteValued, Completion, Le16, Le32, Le64, VirtioTransport};
 use bitflags::bitflags;
-use libc::{c_void, iovec, EIO, ENOTSUP, EPROTO};
+use nix::libc::{c_void, iovec, EIO, ENOTSUP, EPROTO};
 use std::convert::TryFrom;
 use std::io::{Error, ErrorKind};
 use std::iter;
