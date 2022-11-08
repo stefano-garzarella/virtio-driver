@@ -201,7 +201,7 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 ///     unsafe { File::from_raw_fd(fd) }
 /// };
 /// mem_file.set_len(512)?;
-/// let mut mem = unsafe { memmap::MmapMut::map_mut(&mem_file) }?;
+/// let mut mem = unsafe { memmap2::MmapMut::map_mut(&mem_file) }?;
 /// vhost.write().unwrap().map_mem_region(mem.as_ptr() as usize, 512, mem_file.as_raw_fd(), 0)?;
 ///
 /// // Submit a request

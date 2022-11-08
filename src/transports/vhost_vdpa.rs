@@ -8,7 +8,7 @@ use crate::{
     ByteValued, EfdFlags, EventFd, Iova, IovaTranslator, QueueNotifier, VirtioFeatureFlags,
     VirtioTransport,
 };
-use memmap::MmapMut;
+use memmap2::MmapMut;
 use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
 use std::ffi::CStr;
 use std::fs::File;

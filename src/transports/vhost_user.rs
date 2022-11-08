@@ -6,7 +6,7 @@ mod vhost_user_protocol;
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
 use crate::{ByteValued, EfdFlags, EventFd, Iova, IovaTranslator, QueueNotifier, VirtioTransport};
 use front_end::{VhostUserFrontEnd, VhostUserMemoryRegionInfo};
-use memmap::MmapMut;
+use memmap2::MmapMut;
 use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
 use std::convert::{TryFrom, TryInto};
 use std::ffi::CStr;
