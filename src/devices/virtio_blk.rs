@@ -73,6 +73,20 @@ pub fn validate_lba(offset: u64) -> Result<(), Error> {
     to_lba(offset).map(|_| ())
 }
 
+pub fn max_queues(transport: &VirtioBlkTransport) -> Result<usize, Error> {
+    // Some transports (e.g. vhost-vdpa before Linux v5.18) may not be able
+    // to provide the number of queues, so let's look in the config space.
+    let features = VirtioBlkFeatureFlags::from_bits_truncate(transport.get_features());
+    if features.contains(VirtioBlkFeatureFlags::MQ) {
+        let cfg = transport.get_config()?;
+        Ok(u16::from(cfg.num_queues) as usize)
+    } else {
+        // If VirtioBlkFeatureFlags::MQ is not negotiated, the device supports
+        // only a single queue
+        Ok(1)
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 #[repr(C, packed)]
 #[allow(dead_code)]
@@ -245,7 +259,7 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
         num_queues: usize,
         queue_size: u16,
     ) -> Result<Vec<Self>, Error> {
-        if transport.max_queues() < num_queues {
+        if max_queues(transport)? < num_queues {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "Too many queues requested",

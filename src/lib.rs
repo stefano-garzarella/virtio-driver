@@ -6,7 +6,7 @@
 use bitflags::bitflags;
 use std::io::Error;
 
-mod devices;
+pub mod devices;
 mod transports;
 mod util;
 pub mod virtqueue;
