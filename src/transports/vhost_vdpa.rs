@@ -21,11 +21,11 @@ use vhost_vdpa_kernel::VhostVdpaKernel;
 use virtio_bindings::bindings::virtio_blk::*;
 
 #[derive(Debug)]
-pub struct VhostVdpaBlkError(std::io::Error);
+pub struct VhostVdpaError(std::io::Error);
 
-impl<E: 'static + std::error::Error + Send + Sync> From<E> for VhostVdpaBlkError {
+impl<E: 'static + std::error::Error + Send + Sync> From<E> for VhostVdpaError {
     fn from(e: E) -> Self {
-        VhostVdpaBlkError(Error::new(ErrorKind::Other, e))
+        VhostVdpaError(Error::new(ErrorKind::Other, e))
     }
 }
 
@@ -47,7 +47,7 @@ unsafe impl<C: ByteValued, R: Copy> Send for VhostVdpa<C, R> {}
 unsafe impl<C: ByteValued, R: Copy> Sync for VhostVdpa<C, R> {}
 
 impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
-    pub fn new(path: &str, virtio_features: u64) -> Result<Self, VhostVdpaBlkError> {
+    pub fn new(path: &str, virtio_features: u64) -> Result<Self, VhostVdpaError> {
         let mut vdpa = VhostVdpaKernel::new(path)?;
 
         vdpa.set_status(0)?;
