@@ -41,6 +41,7 @@ mod kuapi {
         vhost_vring_state
     );
     ioctl_read!(vhost_vdpa_get_vring_num, VHOST_VIRTIO, 0x76, u16);
+    ioctl_read!(vhost_vdpa_get_vqs_count, VHOST_VIRTIO, 0x80, u32);
 
     pub fn send_iotlb_msg(
         fd: RawFd,
@@ -294,6 +295,14 @@ impl VhostVdpaKernel {
                 Err(e) => Err(Error::new(ErrorKind::InvalidInput, e)),
             }
         }
+    }
+
+    pub fn get_vqs_count(&self) -> Result<u32, Error> {
+        let mut count: u32 = 0;
+
+        unsafe { kuapi::vhost_vdpa_get_vqs_count(self.backend.as_raw_fd(), &mut count)? };
+
+        Ok(count)
     }
 
     pub fn dma_map(

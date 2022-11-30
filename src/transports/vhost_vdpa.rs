@@ -68,8 +68,8 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
             unsafe { File::from_raw_fd(fd) }
         };
 
-        //TODO: VHOST_VDPA_GET_VQS_COUNT support (we need to update the vhost crate)
-        let max_queues = None;
+        // VHOST_VDPA_GET_VQS_COUNT ioctl is only supported starting with Linux v5.18.
+        let max_queues = vdpa.get_vqs_count().map(|v| v as usize).ok();
         let max_mem_regions = u64::MAX;
 
         let vu = VhostVdpa {
