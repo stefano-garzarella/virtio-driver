@@ -45,8 +45,9 @@ pub trait IovaTranslator: Send + Sync {
 /// - `R` has the same meaning as in [`Virtqueue`], and is used to store device-specific per-request
 ///   data.
 pub trait VirtioTransport<C: ByteValued, R: Copy>: Send + Sync {
-    /// Returns the maximum number of queues supported by the device.
-    fn max_queues(&self) -> usize;
+    /// Returns the maximum number of queues supported by the device if the transport is able to
+    /// get this information.
+    fn max_queues(&self) -> Option<usize>;
 
     /// Returns the maximum number of memory regions supported by the transport.
     fn max_mem_regions(&self) -> u64;

@@ -35,7 +35,7 @@ impl From<Error> for VhostUserError {
 pub struct VhostUser<C: ByteValued, R: Copy> {
     vhost: VhostUserFrontEnd,
     features: u64,
-    max_queues: usize,
+    max_queues: Option<usize>,
     max_mem_regions: u64,
     mem_table: Vec<VhostUserMemoryRegionInfo>,
     virtqueue_mem_file: File,
@@ -82,12 +82,14 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
         vhost.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
 
         let max_queues = if vhost_features.contains(VhostUserProtocolFeatures::MQ) {
-            vhost
-                .get_queue_num()?
-                .try_into()
-                .map_err(|e| Error::new(ErrorKind::InvalidInput, e))?
+            Some(
+                vhost
+                    .get_queue_num()?
+                    .try_into()
+                    .map_err(|e| Error::new(ErrorKind::InvalidInput, e))?,
+            )
         } else {
-            1
+            None
         };
         let max_mem_regions = vhost.get_max_mem_slots()?;
 
@@ -156,7 +158,7 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
 }
 
 impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
-    fn max_queues(&self) -> usize {
+    fn max_queues(&self) -> Option<usize> {
         self.max_queues
     }
 

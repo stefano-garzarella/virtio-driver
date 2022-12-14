@@ -33,7 +33,7 @@ impl<E: 'static + std::error::Error + Send + Sync> From<E> for VhostVdpaError {
 pub struct VhostVdpa<C: ByteValued, R: Copy> {
     vdpa: VhostVdpaKernel,
     features: u64,
-    max_queues: usize,
+    max_queues: Option<usize>,
     max_mem_regions: u64,
     virtqueue_mem_file: File,
     mmap: Option<MmapMut>,
@@ -69,7 +69,7 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
         };
 
         //TODO: VHOST_VDPA_GET_VQS_COUNT support (we need to update the vhost crate)
-        let max_queues = u16::MAX as usize;
+        let max_queues = None;
         let max_mem_regions = u64::MAX;
 
         let vu = VhostVdpa {
@@ -109,7 +109,7 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
 }
 
 impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
-    fn max_queues(&self) -> usize {
+    fn max_queues(&self) -> Option<usize> {
         self.max_queues
     }
 

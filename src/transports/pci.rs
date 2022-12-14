@@ -552,8 +552,8 @@ impl<C: ByteValued, R: Copy> Drop for Pci<C, R> {
 }
 
 impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
-    fn max_queues(&self) -> usize {
-        self.max_queues
+    fn max_queues(&self) -> Option<usize> {
+        Some(self.max_queues)
     }
 
     fn max_mem_regions(&self) -> u64 {
