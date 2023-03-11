@@ -387,7 +387,6 @@ impl<C: ByteValued, R: Copy> Pci<C, R> {
                 .read()?;
 
             queue_notify_offsets = (0..common_cfg.num_queues().read()?)
-                .into_iter()
                 .map(|i| {
                     common_cfg.queue_select().write(i)?;
                     let offset = common_cfg.queue_notify_off().read()?;
