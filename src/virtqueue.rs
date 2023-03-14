@@ -208,6 +208,7 @@ pub struct Virtqueue<'a, R: Copy> {
     desc: &'a mut [VirtqueueDescriptor],
     req: *mut R,
     first_free_desc: u16,
+    layout: VirtqueueLayout,
     event_idx_enabled: bool,
 
     // Used only when event_idx_enabled is true
@@ -282,6 +283,7 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
             used,
             req,
             first_free_desc: 0,
+            layout,
             event_idx_enabled,
             used_notif_enabled: false,
             old_avail_idx: Wrapping(0),
@@ -291,6 +293,11 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
     /// Returns the number of entries in each of the descriptor table and rings.
     pub fn queue_size(&self) -> u16 {
         self.queue_size
+    }
+
+    /// Returns the virtqueue memory layout.
+    pub fn layout(&self) -> &VirtqueueLayout {
+        &self.layout
     }
 
     /// Returns a raw pointer to the start of the descriptor table.

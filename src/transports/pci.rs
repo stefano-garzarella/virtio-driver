@@ -447,7 +447,7 @@ impl<C: ByteValued, R: Copy> Pci<C, R> {
             common_cfg.queue_size().write(queue.queue_size())?;
             common_cfg.queue_msix_vector().write(i as u16)?;
 
-            let queue_layout = VirtqueueLayout::new::<R>(1, queue.queue_size() as usize)?;
+            let queue_layout = queue.layout();
 
             self.set_64_bit_iova_register(
                 queue.desc_table_ptr(),

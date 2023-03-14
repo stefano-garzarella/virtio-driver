@@ -120,7 +120,7 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
     fn setup_queue(&mut self, queue_idx: usize, q: &Virtqueue<R>) -> Result<(), Error> {
         let vdpa = &mut self.vdpa;
         let iova_space = self.iova_space.read().unwrap();
-        let q_layout = VirtqueueLayout::new::<R>(1, q.queue_size() as usize)?;
+        let q_layout = q.layout();
 
         vdpa.set_vring_num(queue_idx, q.queue_size().into())?;
         vdpa.set_vring_base(queue_idx, 0)?;
