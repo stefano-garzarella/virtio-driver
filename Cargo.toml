@@ -12,7 +12,7 @@ categories = ["hardware-support", "virtualization"]
 default = []
 pci = ["pci-driver"]
 vhost-user = ["memmap2", "nix/fs"]
-vhost-vdpa = ["memmap2", "nix/fs", "virtio-bindings"]
+vhost-vdpa = ["memmap2", "nix/fs", "nix/ioctl", "virtio-bindings"]
 _unsafe-op-in-unsafe-fn = []
 
 [dependencies]
