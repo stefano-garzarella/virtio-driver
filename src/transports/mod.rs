@@ -20,11 +20,8 @@ pub use vhost_vdpa::VhostVdpa;
 
 use crate::util::bytevalued::ByteValued;
 use crate::util::eventfd::EventFd;
+use crate::util::iova::Iova;
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-
-/// Wraps a `u64` representing an IOVA.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct Iova(pub u64);
 
 /// Something that can translate process addresses into IOVAs.
 pub trait IovaTranslator: Send + Sync {

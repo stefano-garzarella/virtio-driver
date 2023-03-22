@@ -16,6 +16,7 @@ pub use transports::*;
 pub use util::bytevalued::*;
 pub use util::endian::*;
 pub use util::eventfd::*;
+use util::iova::*;
 pub use util::sock_ctrl_msg::*;
 
 // Reexport `iovec` since it appear in public APIs.
