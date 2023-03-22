@@ -14,9 +14,69 @@ use std::os::unix::io::{AsRawFd, RawFd};
 
 mod kuapi {
     use super::super::vhost_bindings::*;
-    use nix::{ioctl_none, ioctl_read, ioctl_write_ptr, unistd::write};
+    use libc::{c_ulong, ioctl};
+    use rustix::fd::AsFd;
+    use rustix::io::write;
     use std::io::Error;
     use std::os::unix::io::RawFd;
+
+    const IOC_NRBITS: c_ulong = 8;
+    const IOC_TYPEBITS: c_ulong = 8;
+    const IOC_SIZEBITS: c_ulong = 14;
+
+    const IOC_NRSHIFT: c_ulong = 0;
+    const IOC_TYPESHIFT: c_ulong = IOC_NRSHIFT + IOC_NRBITS;
+    const IOC_SIZESHIFT: c_ulong = IOC_TYPESHIFT + IOC_TYPEBITS;
+    const IOC_DIRSHIFT: c_ulong = IOC_SIZESHIFT + IOC_SIZEBITS;
+
+    const IOC_NONE: c_ulong = 0;
+    const IOC_WRITE: c_ulong = 1;
+    const IOC_READ: c_ulong = 2;
+
+    const fn ioctl_cmd<T>(dir: c_ulong, ty: c_ulong, nr: c_ulong) -> c_ulong {
+        (dir << IOC_DIRSHIFT)
+            | (ty << IOC_TYPESHIFT)
+            | (nr << IOC_NRSHIFT)
+            | ((std::mem::size_of::<T>() as c_ulong) << IOC_SIZESHIFT)
+    }
+
+    fn ioctl_return_to_result(ret: i32) -> Result<i32, Error> {
+        if ret >= 0 {
+            Ok(ret)
+        } else {
+            Err(Error::last_os_error())
+        }
+    }
+
+    macro_rules! ioctl_none {
+        ($name:ident, $ty:expr, $nr:expr) => {
+            pub unsafe fn $name(fd: RawFd) -> Result<i32, Error> {
+                const CMD: c_ulong = ioctl_cmd::<()>(IOC_NONE, $ty as c_ulong, $nr as c_ulong);
+                let ret = unsafe { ioctl(fd, CMD) };
+                ioctl_return_to_result(ret)
+            }
+        };
+    }
+
+    macro_rules! ioctl_write_ptr {
+        ($name:ident, $ty:expr, $nr:expr, $arg:ty) => {
+            pub unsafe fn $name(fd: RawFd, arg: *const $arg) -> Result<i32, Error> {
+                const CMD: c_ulong = ioctl_cmd::<$arg>(IOC_WRITE, $ty as c_ulong, $nr as c_ulong);
+                let ret = unsafe { ioctl(fd, CMD, arg) };
+                ioctl_return_to_result(ret)
+            }
+        };
+    }
+
+    macro_rules! ioctl_read {
+        ($name:ident, $ty:expr, $nr:expr, $arg:ty) => {
+            pub unsafe fn $name(fd: RawFd, arg: *mut $arg) -> Result<i32, Error> {
+                const CMD: c_ulong = ioctl_cmd::<$arg>(IOC_READ, $ty as c_ulong, $nr as c_ulong);
+                let ret = unsafe { ioctl(fd, CMD, arg) };
+                ioctl_return_to_result(ret)
+            }
+        };
+    }
 
     ioctl_read!(vhost_get_features, VHOST_VIRTIO, 0x00, u64);
     ioctl_write_ptr!(vhost_set_features, VHOST_VIRTIO, 0x00, u64);
@@ -29,7 +89,7 @@ mod kuapi {
     ioctl_write_ptr!(vhost_set_backend_features, VHOST_VIRTIO, 0x25, u64);
     ioctl_read!(vhost_get_backend_features, VHOST_VIRTIO, 0x26, u64);
 
-    ioctl_read!(vhost_vdpa_get_device_id, VHOST_VIRTIO, 0x70, u32);
+    // ioctl_read!(vhost_vdpa_get_device_id, VHOST_VIRTIO, 0x70, u32);
     ioctl_read!(vhost_vdpa_get_status, VHOST_VIRTIO, 0x71, u8);
     ioctl_write_ptr!(vhost_vdpa_set_status, VHOST_VIRTIO, 0x72, u8);
     ioctl_read!(vhost_vdpa_get_config, VHOST_VIRTIO, 0x73, vhost_vdpa_config);
@@ -40,11 +100,11 @@ mod kuapi {
         0x75,
         vhost_vring_state
     );
-    ioctl_read!(vhost_vdpa_get_vring_num, VHOST_VIRTIO, 0x76, u16);
+    // ioctl_read!(vhost_vdpa_get_vring_num, VHOST_VIRTIO, 0x76, u16);
     ioctl_read!(vhost_vdpa_get_vqs_count, VHOST_VIRTIO, 0x80, u32);
 
     pub fn send_iotlb_msg(
-        fd: RawFd,
+        fd: impl AsFd,
         iotlb: &vhost_iotlb_msg,
         backend_features_acked: u64,
     ) -> Result<(), Error> {
@@ -95,7 +155,7 @@ impl VhostVdpaKernel {
     pub fn new(path: &str) -> Result<Self, Error> {
         let mut vdpa = VhostVdpaKernel {
             backend: OpenOptions::new()
-                .custom_flags(nix::libc::O_CLOEXEC)
+                .custom_flags(libc::O_CLOEXEC)
                 .write(true)
                 .open(path)?,
             backend_features_acked: 0,
@@ -323,11 +383,7 @@ impl VhostVdpaKernel {
             type_: VHOST_IOTLB_UPDATE as u8,
         };
 
-        kuapi::send_iotlb_msg(
-            self.backend.as_raw_fd(),
-            &iotlb,
-            self.backend_features_acked,
-        )
+        kuapi::send_iotlb_msg(&self.backend, &iotlb, self.backend_features_acked)
     }
 
     pub fn dma_unmap(&self, iova: u64, size: u64) -> Result<(), Error> {
@@ -338,10 +394,6 @@ impl VhostVdpaKernel {
             ..Default::default()
         };
 
-        kuapi::send_iotlb_msg(
-            self.backend.as_raw_fd(),
-            &iotlb,
-            self.backend_features_acked,
-        )
+        kuapi::send_iotlb_msg(&self.backend, &iotlb, self.backend_features_acked)
     }
 }

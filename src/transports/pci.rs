@@ -11,7 +11,7 @@
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
 use crate::{
-    ByteValued, EfdFlags, EventFd, Iova, IovaTranslator, QueueNotifier, VirtioFeatureFlags,
+    ByteValued, EventFd, EventfdFlags, Iova, IovaTranslator, QueueNotifier, VirtioFeatureFlags,
     VirtioTransport,
 };
 use pci_driver::config::caps::{CapabilityHeader, VendorSpecificCapability};
@@ -478,7 +478,7 @@ impl<C: ByteValued, R: Copy> Pci<C, R> {
         // enable interrupts
 
         let completion_fds: Box<[_]> =
-            iter::repeat_with(|| Ok(Arc::new(EventFd::new(EfdFlags::EFD_CLOEXEC)?)))
+            iter::repeat_with(|| Ok(Arc::new(EventFd::new(EventfdFlags::CLOEXEC)?)))
                 .take(queues.len())
                 .collect::<io::Result<_>>()?;
 

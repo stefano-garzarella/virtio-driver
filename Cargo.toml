@@ -11,13 +11,14 @@ categories = ["hardware-support", "virtualization"]
 [features]
 default = []
 pci = ["pci-driver"]
-vhost-user = ["memmap2", "nix/fs"]
-vhost-vdpa = ["memmap2", "nix/fs", "nix/ioctl", "virtio-bindings"]
+vhost-user = ["memmap2"]
+vhost-vdpa = ["memmap2", "virtio-bindings"]
 _unsafe-op-in-unsafe-fn = []
 
 [dependencies]
 bitflags = "1.2"
-nix = { version = "0.24", default-features = false, features = ["event"] }
+libc = "0.2"
+rustix = "0.36"
 memmap2 = { version = ">=0.1, <0.6", optional = true }
 pci-driver = { version = "0.1.2", default-features = false, optional = true }
 virtio-bindings = { version = "0.1", features = ["virtio-v5_0_0"], optional = true }

@@ -3,7 +3,7 @@
 use crate::virtqueue::{Virtqueue, VirtqueueIter, VirtqueueLayout};
 use crate::{ByteValued, Completion, Le16, Le32, Le64, VirtioTransport};
 use bitflags::bitflags;
-use nix::libc::{c_void, iovec, EIO, ENOTSUP, EPROTO};
+use libc::{c_void, iovec, EIO, ENOTSUP, EPROTO};
 use std::convert::TryFrom;
 use std::io::{Error, ErrorKind};
 use std::iter;
@@ -198,7 +198,7 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 /// # use virtio_driver::{
 /// #     VhostUser, VirtioBlkQueue, VirtioBlkTransport, VirtioFeatureFlags, VirtioTransport
 /// # };
-/// use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
+/// use rustix::fs::{memfd_create, MemfdFlags};
 /// use std::ffi::CStr;
 /// use std::fs::File;
 /// use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -210,11 +210,7 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 /// let mut queues = VirtioBlkQueue::<&'static str>::setup_queues(&vhost, 1, 128)?;
 ///
 /// // Create shared memory that is visible for the device
-/// let mem_file = {
-///     let name = CStr::from_bytes_with_nul(b"guest-ram\0").unwrap();
-///     let fd = memfd_create(name, MemFdCreateFlag::empty())?;
-///     unsafe { File::from_raw_fd(fd) }
-/// };
+/// let mem_file: File = memfd_create("guest-ram", MemfdFlags::empty())?.into();
 /// mem_file.set_len(512)?;
 /// let mut mem = unsafe { memmap2::MmapMut::map_mut(&mem_file) }?;
 /// vhost.write().unwrap().map_mem_region(mem.as_ptr() as usize, 512, mem_file.as_raw_fd(), 0)?;

@@ -4,17 +4,19 @@ mod front_end;
 mod vhost_user_protocol;
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-use crate::{ByteValued, EfdFlags, EventFd, Iova, IovaTranslator, QueueNotifier, VirtioTransport};
+use crate::{
+    ByteValued, EventFd, EventfdFlags, Iova, IovaTranslator, QueueNotifier, VirtioTransport,
+};
 use front_end::{VhostUserFrontEnd, VhostUserMemoryRegionInfo};
 use memmap2::MmapMut;
-use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
+use rustix::fs::{memfd_create, MemfdFlags};
+use rustix::io::Errno;
 use std::convert::{TryFrom, TryInto};
-use std::ffi::CStr;
 use std::fs::File;
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 use vhost_user_protocol::{
     VhostUserHeaderFlag, VhostUserMemoryRegion, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -26,6 +28,12 @@ pub struct VhostUserError(Error);
 impl From<Error> for VhostUserError {
     fn from(e: Error) -> Self {
         VhostUserError(e)
+    }
+}
+
+impl From<Errno> for VhostUserError {
+    fn from(e: Errno) -> Self {
+        VhostUserError(e.into())
     }
 }
 
@@ -93,12 +101,7 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
         };
         let max_mem_regions = vhost.get_max_mem_slots()?;
 
-        let virtqueue_mem_file = {
-            let name = CStr::from_bytes_with_nul(b"virtio-ring\0").unwrap();
-            let fd = memfd_create(name, MemFdCreateFlag::empty())
-                .map_err(|e| Error::from_raw_os_error(e as i32))?;
-            unsafe { File::from_raw_fd(fd) }
-        };
+        let virtqueue_mem_file: File = memfd_create("virtio-ring", MemfdFlags::empty())?.into();
 
         let vu = VhostUser {
             vhost,
@@ -256,9 +259,9 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
     fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
         for (i, q) in queues.iter().enumerate() {
             self.eventfd_kick
-                .push(Arc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
+                .push(Arc::new(EventFd::new(EventfdFlags::CLOEXEC).unwrap()));
             self.eventfd_call
-                .push(Arc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
+                .push(Arc::new(EventFd::new(EventfdFlags::CLOEXEC).unwrap()));
             self.setup_queue(i, q).map_err(|e| {
                 // If the user actually retries `setup_queues` instead of dropping the
                 // VhostUser object on error, we're going to reconfigure all queues anyway, so

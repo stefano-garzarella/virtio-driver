@@ -19,7 +19,7 @@ pub use util::eventfd::*;
 pub use util::sock_ctrl_msg::*;
 
 // Reexport `iovec` since it appear in public APIs.
-pub use nix::libc::iovec;
+pub use libc::iovec;
 
 bitflags! {
     pub struct VirtioFeatureFlags: u64 {

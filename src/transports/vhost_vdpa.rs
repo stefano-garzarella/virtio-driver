@@ -5,17 +5,16 @@ mod vhost_vdpa_kernel;
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
 use crate::{
-    ByteValued, EfdFlags, EventFd, Iova, IovaTranslator, QueueNotifier, VirtioFeatureFlags,
+    ByteValued, EventFd, EventfdFlags, Iova, IovaTranslator, QueueNotifier, VirtioFeatureFlags,
     VirtioTransport,
 };
 use memmap2::MmapMut;
-use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
-use std::ffi::CStr;
+use rustix::fs::{memfd_create, MemfdFlags};
 use std::fs::File;
 use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 use vhost_vdpa_kernel::VhostVdpaKernel;
 use virtio_bindings::bindings::virtio_blk::*;
@@ -61,12 +60,7 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
 
         vdpa.add_status(VIRTIO_CONFIG_S_FEATURES_OK as u8)?;
 
-        let virtqueue_mem_file = {
-            let name = CStr::from_bytes_with_nul(b"virtio-ring\0").unwrap();
-            let fd = memfd_create(name, MemFdCreateFlag::empty())
-                .map_err(|e| Error::from_raw_os_error(e as i32))?;
-            unsafe { File::from_raw_fd(fd) }
-        };
+        let virtqueue_mem_file: File = memfd_create("virtio-ring", MemfdFlags::empty())?.into();
 
         // VHOST_VDPA_GET_VQS_COUNT ioctl is only supported starting with Linux v5.18.
         let max_queues = vdpa.get_vqs_count().map(|v| v as usize).ok();
@@ -191,9 +185,9 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
     fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
         for (i, q) in queues.iter().enumerate() {
             self.eventfd_kick
-                .push(Arc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
+                .push(Arc::new(EventFd::new(EventfdFlags::CLOEXEC).unwrap()));
             self.eventfd_call
-                .push(Arc::new(EventFd::new(EfdFlags::EFD_CLOEXEC).unwrap()));
+                .push(Arc::new(EventFd::new(EventfdFlags::CLOEXEC).unwrap()));
             self.setup_queue(i, q)
                 .map_err(|e| Error::new(ErrorKind::Other, e))?;
         }

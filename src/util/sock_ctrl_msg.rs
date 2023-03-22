@@ -17,7 +17,7 @@ use std::os::unix::net::{UnixDatagram, UnixStream};
 use std::ptr::{copy_nonoverlapping, null_mut, write_unaligned};
 use std::slice;
 
-use nix::libc::{
+use libc::{
     c_long, c_void, cmsghdr, iovec, msghdr, recvmsg, sendmsg, MSG_NOSIGNAL, SCM_RIGHTS, SOL_SOCKET,
 };
 
@@ -355,9 +355,9 @@ mod tests {
     use std::os::unix::net::UnixDatagram;
     use std::slice::from_raw_parts;
 
-    use nix::libc::cmsghdr;
+    use libc::cmsghdr;
 
-    use crate::{EfdFlags, EventFd};
+    use crate::{EventFd, EventfdFlags};
 
     #[test]
     fn buffer_len() {
@@ -421,7 +421,7 @@ mod tests {
     fn send_recv_only_fd() {
         let (s1, s2) = UnixDatagram::pair().expect("failed to create socket pair");
 
-        let evt = EventFd::new(EfdFlags::empty()).expect("failed to create eventfd");
+        let evt = EventFd::new(EventfdFlags::empty()).expect("failed to create eventfd");
         let ioslice = IoSlice::new([].as_ref());
         let write_count = s1
             .send_with_fd(&[ioslice], evt.as_raw_fd())
@@ -449,7 +449,7 @@ mod tests {
     fn send_recv_with_fd() {
         let (s1, s2) = UnixDatagram::pair().expect("failed to create socket pair");
 
-        let evt = EventFd::new(EfdFlags::empty()).expect("failed to create eventfd");
+        let evt = EventFd::new(EventfdFlags::empty()).expect("failed to create eventfd");
         let ioslice = IoSlice::new([237].as_ref());
         let write_count = s1
             .send_with_fds(&[ioslice], &[evt.as_raw_fd()])
