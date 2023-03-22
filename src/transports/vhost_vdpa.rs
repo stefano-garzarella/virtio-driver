@@ -5,8 +5,8 @@ mod vhost_vdpa_kernel;
 
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
 use crate::{
-    ByteValued, EventFd, EventfdFlags, Iova, IovaTranslator, QueueNotifier, VirtioFeatureFlags,
-    VirtioTransport,
+    ByteValued, EventFd, EventfdFlags, Iova, IovaSpace, IovaTranslator, QueueNotifier,
+    VirtioFeatureFlags, VirtioTransport,
 };
 use memmap2::MmapMut;
 use rustix::fs::{memfd_create, MemfdFlags};
@@ -15,7 +15,8 @@ use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use vhost_bindings::VHOST_PAGE_SIZE;
 use vhost_vdpa_kernel::VhostVdpaKernel;
 use virtio_bindings::virtio_config::*;
 
@@ -38,6 +39,7 @@ pub struct VhostVdpa<C: ByteValued, R: Copy> {
     mmap: Option<MmapMut>,
     eventfd_kick: Vec<Arc<EventFd>>,
     eventfd_call: Vec<Arc<EventFd>>,
+    iova_space: Arc<RwLock<IovaSpace>>,
     phantom: PhantomData<(C, R)>,
 }
 
@@ -96,6 +98,9 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
         let max_queues = vdpa.get_vqs_count().map(|v| v as usize).ok();
         let max_mem_regions = u64::MAX;
 
+        let (iova_start, iova_end) = vdpa.get_iova_range()?.into_inner();
+        let iova_space = IovaSpace::new([Iova(iova_start)..=Iova(iova_end)]);
+
         let vu = VhostVdpa {
             vdpa,
             features,
@@ -105,6 +110,7 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
             mmap: None,
             eventfd_kick: Vec::new(),
             eventfd_call: Vec::new(),
+            iova_space: Arc::new(RwLock::new(iova_space)),
             phantom: PhantomData,
         };
 
@@ -113,15 +119,29 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
 
     fn setup_queue(&mut self, queue_idx: usize, q: &Virtqueue<R>) -> Result<(), Error> {
         let vdpa = &mut self.vdpa;
+        let iova_space = self.iova_space.read().unwrap();
+        let q_layout = VirtqueueLayout::new::<R>(1, q.queue_size() as usize)?;
 
         vdpa.set_vring_num(queue_idx, q.queue_size().into())?;
         vdpa.set_vring_base(queue_idx, 0)?;
-        vdpa.set_vring_addr(
-            queue_idx,
-            q.desc_table_ptr() as u64,
-            q.used_ring_ptr() as u64,
-            q.avail_ring_ptr() as u64,
-        )?;
+
+        let Iova(desc_user_addr) = iova_space
+            .translate(q.desc_table_ptr() as usize, q_layout.avail_offset)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Descriptor table is not mapped"))?;
+        let Iova(used_user_addr) = iova_space
+            .translate(
+                q.used_ring_ptr() as usize,
+                q_layout.req_offset - q_layout.used_offset,
+            )
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Used ring is not mapped"))?;
+        let Iova(avail_user_addr) = iova_space
+            .translate(
+                q.avail_ring_ptr() as usize,
+                q_layout.used_offset - q_layout.avail_offset,
+            )
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Available ring is not mapped"))?;
+
+        vdpa.set_vring_addr(queue_idx, desc_user_addr, used_user_addr, avail_user_addr)?;
 
         vdpa.set_vring_kick(queue_idx, self.eventfd_kick[queue_idx].as_raw_fd())?;
         vdpa.set_vring_call(queue_idx, self.eventfd_call[queue_idx].as_raw_fd())?;
@@ -157,14 +177,16 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
             ));
         }
 
+        let alignment = self.mem_region_alignment();
+
+        let vq_mem_size = layout
+            .num_queues
+            .checked_mul(layout.end_offset)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Queue is too large"))?;
+        let vq_mem_size = ((vq_mem_size + alignment - 1) / alignment) * alignment;
+
         // TODO This assumes that all virtqueues have the same queue_size
-        self.virtqueue_mem_file.set_len(
-            layout
-                .num_queues
-                .checked_mul(layout.end_offset)
-                .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Queue is too large"))?
-                as u64,
-        )?;
+        self.virtqueue_mem_file.set_len(vq_mem_size as u64)?;
 
         let mmap = unsafe { MmapMut::map_mut(&self.virtqueue_mem_file) }?;
         self.map_mem_region(
@@ -185,35 +207,74 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         _fd: RawFd,
         _fd_offset: i64,
     ) -> Result<Iova, Error> {
+        let mut iova_space = self.iova_space.write().unwrap();
+        let iova = iova_space.allocate(addr, len)?;
+
         // `_fd` is not used here because the vhost-vdpa kernel module retrieves
         // the fd associated with the VA directly into the kernel, so there is
         // no need to pass it to the call.
         // This is needed only when the vDPA device uses VA and requires an
         // associated fd (e.g. VDUSE devices).
-        self.vdpa
-            .dma_map(addr as u64, len as u64, addr as *const u8, false)
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
-        Ok(Iova(addr as u64))
+        let ret = self
+            .vdpa
+            .dma_map(iova.0, len as u64, addr as *const u8, false);
+
+        match ret {
+            Ok(()) => Ok(iova),
+            Err(e) => {
+                iova_space.free(addr, len);
+                Err(e)
+            }
+        }
     }
 
     fn unmap_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error> {
+        let mut iova_space = self.iova_space.write().unwrap();
+
+        let Iova(iova) = iova_space.translate(addr, len).ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "Address range [{:#x}, {:#x}) is not mapped",
+                    addr,
+                    addr + len
+                ),
+            )
+        })?;
+
         self.vdpa
-            .dma_unmap(addr as u64, len as u64)
+            .dma_unmap(iova, len as u64)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
+
+        iova_space.free(addr, len);
+
         Ok(())
     }
 
     fn iova_translator(&self) -> Box<dyn IovaTranslator> {
         #[derive(Clone)]
-        struct VhostVdpaIovaTranslator;
+        struct VhostVdpaIovaTranslator {
+            iova_space: Arc<RwLock<IovaSpace>>,
+        }
 
         impl IovaTranslator for VhostVdpaIovaTranslator {
-            fn translate_addr(&self, addr: usize, _len: usize) -> Result<Iova, Error> {
-                Ok(Iova(addr as u64))
+            fn translate_addr(&self, addr: usize, len: usize) -> Result<Iova, Error> {
+                self.iova_space
+                    .read()
+                    .unwrap()
+                    .translate(addr, len)
+                    .ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::InvalidInput,
+                            format!("Trying to translate unmapped address {} into an IOVA", addr),
+                        )
+                    })
             }
         }
 
-        Box::new(VhostVdpaIovaTranslator)
+        Box::new(VhostVdpaIovaTranslator {
+            iova_space: Arc::clone(&self.iova_space),
+        })
     }
 
     fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
