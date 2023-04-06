@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: (MIT OR Apache-2.0)
 
 use crate::virtqueue::{Virtqueue, VirtqueueIter, VirtqueueLayout};
-use crate::{ByteValued, Completion, Le16, Le32, Le64, VirtioTransport};
+use crate::{ByteValued, Completion, Le16, Le32, Le64, VirtioFeatureFlags, VirtioTransport};
 use bitflags::bitflags;
 use libc::{c_void, iovec, EIO, ENOTSUP, EPROTO};
 use std::convert::TryFrom;
@@ -263,6 +263,8 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
         }
 
         let layout = VirtqueueLayout::new::<VirtioBlkReqBuf>(num_queues, queue_size as usize)?;
+        let event_idx_enabled =
+            transport.get_features() & VirtioFeatureFlags::RING_EVENT_IDX.bits() != 0;
         let queues: Vec<_> = {
             // Not actually needless: must drop the borrow on the transport before alloc_queue_mem()
             #[allow(clippy::needless_collect)]
@@ -282,7 +284,7 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
                             layout.end_offset,
                         )
                     };
-                    Virtqueue::new(iova_translator, mem_queue, queue_size)
+                    Virtqueue::new(iova_translator, mem_queue, queue_size, event_idx_enabled)
                 })
                 .collect::<Result<_, _>>()?
         };
@@ -514,6 +516,14 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
             it: self.vq.completions(),
             req_contexts: &mut self.req_contexts,
         }
+    }
+
+    pub fn avail_notif_needed(&mut self) -> bool {
+        self.vq.avail_notif_needed()
+    }
+
+    pub fn set_used_notif_enabled(&mut self, enabled: bool) {
+        self.vq.set_used_notif_enabled(enabled);
     }
 }
 

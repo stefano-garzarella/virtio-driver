@@ -90,7 +90,7 @@ impl VirtqueueLayout {
 /// VIRTIO 1.1 specification (see 2.6.6 and 2.6.8).
 #[repr(C)]
 struct VirtqueueRingData<T> {
-    _flags: Le16,
+    flags: AtomicU16,
     idx: AtomicU16,
     ring: [T],
 }
@@ -101,6 +101,7 @@ struct VirtqueueRingData<T> {
 /// and device implementations.
 struct VirtqueueRing<'a, T: Clone> {
     ptr: *mut VirtqueueRingData<T>,
+    event: *mut AtomicU16,
     _ptr_lifetime: PhantomData<&'a ()>,
     queue_size: usize,
     next_idx: Wrapping<u16>,
@@ -108,18 +109,22 @@ struct VirtqueueRing<'a, T: Clone> {
 
 impl<'a, T: Clone> VirtqueueRing<'a, T> {
     fn new(mem: &'a mut [u8], queue_size: usize) -> Self {
-        // See `struct virtq_avail` (2.6.6) and `struct virtq_used` (2.6.8) in the VIRTIO 1.1
+        // See `struct virtq_avail` (2.7.6) and `struct virtq_used` (2.7.8) in the VIRTIO 1.2
         // specification. `flags` and `idx` are Le16 fields (4 bytes in total) that precede the
-        // actual ring buffer. `queue_size` is the number of entries in the ring buffer.
-        assert!(mem.len() >= 4 + queue_size * mem::size_of::<T>());
+        // actual ring buffer. `queue_size` is the number of entries in the ring buffer, `event` is
+        // used to enable/disable notification when the VIRTIO_F_EVENT_IDX feature is negotiated.
+        assert!(mem.len() >= 6 + queue_size * mem::size_of::<T>());
 
         // VirtqueueRingData is a DST because of the unsized `ring` field. Construct a fat
         // pointer to it by casting a slice pointer.
         let slice_ptr = std::ptr::slice_from_raw_parts_mut(mem.as_mut_ptr(), queue_size);
         let ptr = slice_ptr as *mut VirtqueueRingData<T>;
+        let event =
+            unsafe { mem.as_mut_ptr().add(4 + queue_size * mem::size_of::<T>()) as *mut AtomicU16 };
 
         VirtqueueRing {
             ptr,
+            event,
             _ptr_lifetime: PhantomData,
             queue_size,
             next_idx: Wrapping(0),
@@ -160,8 +165,22 @@ impl<'a, T: Clone> VirtqueueRing<'a, T> {
         }
     }
 
+    fn store_flags(&self, value: u16) {
+        unsafe {
+            (*self.ptr).flags.store(value.to_le(), Ordering::Release);
+        }
+    }
+
     fn load_next_idx(&self) -> u16 {
         unsafe { u16::from_le((*self.ptr).idx.load(Ordering::Acquire)) }
+    }
+
+    fn load_event(&self) -> u16 {
+        unsafe { u16::from_le((*self.event).load(Ordering::Acquire)) }
+    }
+
+    fn load_flags(&self) -> u16 {
+        unsafe { u16::from_le((*self.ptr).flags.load(Ordering::Acquire)) }
     }
 
     fn num_pending(&self) -> usize {
@@ -184,6 +203,11 @@ pub struct Virtqueue<'a, R: Copy> {
     desc: &'a mut [VirtqueueDescriptor],
     req: *mut R,
     first_free_desc: u16,
+    event_idx_enabled: bool,
+
+    // Used only when event_idx_enabled is true
+    used_notif_enabled: bool,
+    old_avail_idx: Wrapping<u16>,
 }
 
 // `Send` and `Sync` are not implemented automatically due to the `avail`, `used`, and `req` fields.
@@ -212,6 +236,7 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
         iova_translator: Box<dyn IovaTranslator>,
         buf: &'a mut [u8],
         queue_size: u16,
+        event_idx_enabled: bool,
     ) -> Result<Self, Error> {
         let layout = VirtqueueLayout::new::<R>(1, queue_size as usize)?;
         let mem = buf
@@ -252,6 +277,9 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
             used,
             req,
             first_free_desc: 0,
+            event_idx_enabled,
+            used_notif_enabled: true,
+            old_avail_idx: Wrapping(0),
         })
     }
 
@@ -366,6 +394,40 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
     pub fn completions(&mut self) -> VirtqueueIter<'_, 'a, R> {
         VirtqueueIter { virtqueue: self }
     }
+
+    fn update_used_event(&self) {
+        unsafe {
+            (*self.avail.event).store(
+                if self.used_notif_enabled {
+                    self.used.next_idx.0.to_le()
+                } else {
+                    (self.used.next_idx - Wrapping(1)).0.to_le()
+                },
+                Ordering::Release,
+            )
+        };
+    }
+
+    pub fn avail_notif_needed(&mut self) -> bool {
+        if self.event_idx_enabled {
+            let new_avail_idx = self.avail.next_idx;
+            let ret = new_avail_idx - Wrapping(self.used.load_event()) - Wrapping(1)
+                < new_avail_idx - self.old_avail_idx;
+            self.old_avail_idx = new_avail_idx;
+            ret
+        } else {
+            self.used.load_flags() == 0
+        }
+    }
+
+    pub fn set_used_notif_enabled(&mut self, enabled: bool) {
+        if self.event_idx_enabled {
+            self.used_notif_enabled = enabled;
+            self.update_used_event();
+        } else {
+            self.avail.store_flags(!enabled as u16);
+        }
+    }
 }
 
 /// An iterator that returns all completed requests.
@@ -383,12 +445,21 @@ impl<'a, 'queue, R: Copy> Iterator for VirtqueueIter<'a, 'queue, R> {
     type Item = VirtqueueCompletion<R>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next = self.virtqueue.used.pop()?;
-        let idx = (next.idx.to_native() % (self.virtqueue.queue_size as u32)) as u16;
-        self.virtqueue.free_desc(idx);
+        if let Some(next) = self.virtqueue.used.pop() {
+            let idx = (next.idx.to_native() % (self.virtqueue.queue_size as u32)) as u16;
+            self.virtqueue.free_desc(idx);
+            if self.virtqueue.event_idx_enabled && self.virtqueue.used_notif_enabled {
+                self.virtqueue.update_used_event();
+            }
 
-        let req = unsafe { *self.virtqueue.req.offset(idx as isize) };
-        Some(VirtqueueCompletion { idx, req })
+            let req = unsafe { *self.virtqueue.req.offset(idx as isize) };
+            Some(VirtqueueCompletion { idx, req })
+        } else {
+            if self.virtqueue.event_idx_enabled && !self.virtqueue.used_notif_enabled {
+                self.virtqueue.update_used_event();
+            }
+            None
+        }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
