@@ -10,7 +10,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Error, ErrorKind};
 use std::mem;
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
 mod kuapi {
     use super::super::vhost_bindings::*;
@@ -152,7 +152,7 @@ pub struct VhostVdpaKernel {
 }
 
 impl VhostVdpaKernel {
-    pub fn new(path: &str) -> Result<Self, Error> {
+    pub fn with_path(path: &str) -> Result<Self, Error> {
         let mut vdpa = VhostVdpaKernel {
             backend: OpenOptions::new()
                 .custom_flags(libc::O_CLOEXEC)
@@ -161,14 +161,31 @@ impl VhostVdpaKernel {
             backend_features_acked: 0,
         };
 
-        unsafe { kuapi::vhost_set_owner(vdpa.backend.as_raw_fd())? };
-
-        let backend_features = vdpa.get_backend_features()?;
-        // We only need VHOST_BACKEND_F_IOTLB_MSG_V2 (if available) to support
-        // dma_map/dma_unmap messages
-        vdpa.set_backend_features(backend_features & VHOST_BACKEND_F_IOTLB_MSG_V2 as u64)?;
+        vdpa.connect()?;
 
         Ok(vdpa)
+    }
+
+    pub unsafe fn with_fd(fd: RawFd) -> Result<Self, Error> {
+        let mut vdpa = VhostVdpaKernel {
+            backend: unsafe { File::from_raw_fd(fd) },
+            backend_features_acked: 0,
+        };
+
+        vdpa.connect()?;
+
+        Ok(vdpa)
+    }
+
+    fn connect(&mut self) -> Result<(), Error> {
+        unsafe { kuapi::vhost_set_owner(self.backend.as_raw_fd())? };
+
+        let backend_features = self.get_backend_features()?;
+        // We only need VHOST_BACKEND_F_IOTLB_MSG_V2 (if available) to support
+        // dma_map/dma_unmap messages
+        self.set_backend_features(backend_features & VHOST_BACKEND_F_IOTLB_MSG_V2 as u64)?;
+
+        Ok(())
     }
 
     fn get_backend_features(&self) -> Result<u64, Error> {

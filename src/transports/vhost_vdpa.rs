@@ -46,9 +46,39 @@ unsafe impl<C: ByteValued, R: Copy> Send for VhostVdpa<C, R> {}
 unsafe impl<C: ByteValued, R: Copy> Sync for VhostVdpa<C, R> {}
 
 impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
-    pub fn new(path: &str, virtio_features: u64) -> Result<Self, VhostVdpaError> {
-        let mut vdpa = VhostVdpaKernel::new(path)?;
+    /// Creates a new vhost-vdpa connection using the given system path of the
+    /// vhost-vdpa character device.
+    ///
+    /// A connection created this way is usually passed to a virtio driver.
+    ///
+    /// `virtio_features` is a bit mask that contains all virtio features that should be accepted
+    /// while connecting if the device offers them. It is not an error if the device doesn't offer
+    /// feature flags. The caller is responsible for checking them if it requires a flag.
+    pub fn with_path(path: &str, virtio_features: u64) -> Result<Self, VhostVdpaError> {
+        let vdpa = VhostVdpaKernel::with_path(path)?;
 
+        Self::init(vdpa, virtio_features)
+    }
+
+    /// Creates a new vhost-vdpa connection using the given file descriptor.
+    ///
+    /// A connection created this way is usually passed to a virtio driver.
+    ///
+    /// `virtio_features` is a bit mask that contains all virtio features that should be accepted
+    /// while connecting if the device offers them. It is not an error if the device doesn't offer
+    /// feature flags. The caller is responsible for checking them if it requires a flag.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the `fd` is a valid file descriptor of a vhost-vdpa character
+    /// device.
+    pub unsafe fn with_fd(fd: RawFd, virtio_features: u64) -> Result<Self, VhostVdpaError> {
+        let vdpa = unsafe { VhostVdpaKernel::with_fd(fd)? };
+
+        Self::init(vdpa, virtio_features)
+    }
+
+    fn init(mut vdpa: VhostVdpaKernel, virtio_features: u64) -> Result<Self, VhostVdpaError> {
         vdpa.set_status(0)?;
 
         vdpa.add_status((VIRTIO_CONFIG_S_ACKNOWLEDGE | VIRTIO_CONFIG_S_DRIVER) as u8)?;
