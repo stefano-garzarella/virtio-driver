@@ -252,10 +252,15 @@ impl VhostUserMsg {
             ));
         }
 
-        #[allow(unaligned_references)]
+        // We can't create a reference to `self.payload` because it would be unaligned, and we can't
+        // use `std::ptr::addr_of` since it isn't available in Rust 1.48. But we know that we have a
+        // single field of type `VhostUserHeader` before the `self.payload` field, and that there is
+        // no padding because `VhostUserMsg` is packed, so we just get a pointer to `self` and
+        // advance it by the size of `VhostUserHeader`.
+        let payload_offset = std::mem::size_of::<VhostUserHeader>();
         let payload_buf = unsafe {
             slice::from_raw_parts_mut(
-                &self.payload as *const VhostUserPayload as *mut u8,
+                (self as *const VhostUserMsg as *mut u8).add(payload_offset),
                 self.hdr.size as usize,
             )
         };
