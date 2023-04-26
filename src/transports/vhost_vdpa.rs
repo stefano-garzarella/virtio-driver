@@ -17,7 +17,7 @@ use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 use vhost_vdpa_kernel::VhostVdpaKernel;
-use virtio_bindings::bindings::virtio_blk::*;
+use virtio_bindings::virtio_config::*;
 
 #[derive(Debug)]
 pub struct VhostVdpaError(std::io::Error);
