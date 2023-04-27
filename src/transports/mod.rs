@@ -20,11 +20,8 @@ pub use vhost_vdpa::VhostVdpa;
 
 use crate::util::bytevalued::ByteValued;
 use crate::util::eventfd::EventFd;
+use crate::util::iova::Iova;
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
-
-/// Wraps a `u64` representing an IOVA.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct Iova(pub u64);
 
 /// Something that can translate process addresses into IOVAs.
 pub trait IovaTranslator: Send + Sync {
@@ -51,6 +48,9 @@ pub trait VirtioTransport<C: ByteValued, R: Copy>: Send + Sync {
 
     /// Returns the maximum number of memory regions supported by the transport.
     fn max_mem_regions(&self) -> u64;
+
+    /// Returns the alignment requirement in bytes of the memory region
+    fn mem_region_alignment(&self) -> usize;
 
     /// Allocates or maps the memory to store the virtqueues in.
     ///

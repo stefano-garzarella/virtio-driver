@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: (MIT OR Apache-2.0)
 
 use super::vhost_bindings::{
-    vhost_iotlb_msg, vhost_vdpa_config, vhost_vring_addr, vhost_vring_file, vhost_vring_state,
-    VHOST_ACCESS_RO, VHOST_ACCESS_RW, VHOST_BACKEND_F_IOTLB_MSG_V2, VHOST_IOTLB_INVALIDATE,
-    VHOST_IOTLB_UPDATE,
+    vhost_iotlb_msg, vhost_vdpa_config, vhost_vdpa_iova_range, vhost_vring_addr, vhost_vring_file,
+    vhost_vring_state, VHOST_ACCESS_RO, VHOST_ACCESS_RW, VHOST_BACKEND_F_IOTLB_MSG_V2,
+    VHOST_IOTLB_INVALIDATE, VHOST_IOTLB_UPDATE,
 };
 use std::alloc::{alloc, dealloc, Layout};
 use std::fs::{File, OpenOptions};
 use std::io::{Error, ErrorKind};
 use std::mem;
+use std::ops::RangeInclusive;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
@@ -101,6 +102,12 @@ mod kuapi {
         vhost_vring_state
     );
     // ioctl_read!(vhost_vdpa_get_vring_num, VHOST_VIRTIO, 0x76, u16);
+    ioctl_read!(
+        vhost_vdpa_get_iova_range,
+        VHOST_VIRTIO,
+        0x78,
+        vhost_vdpa_iova_range
+    );
     ioctl_read!(vhost_vdpa_get_vqs_count, VHOST_VIRTIO, 0x80, u32);
 
     pub fn send_iotlb_msg(
@@ -372,6 +379,14 @@ impl VhostVdpaKernel {
                 Err(e) => Err(Error::new(ErrorKind::InvalidInput, e)),
             }
         }
+    }
+
+    pub fn get_iova_range(&self) -> Result<RangeInclusive<u64>, Error> {
+        let mut iova = vhost_vdpa_iova_range::default();
+
+        unsafe { kuapi::vhost_vdpa_get_iova_range(self.backend.as_raw_fd(), &mut iova)? };
+
+        Ok(iova.first..=iova.last)
     }
 
     pub fn get_vqs_count(&self) -> Result<u32, Error> {
