@@ -141,6 +141,10 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         self.max_mem_regions
     }
 
+    fn mem_region_alignment(&self) -> usize {
+        VHOST_PAGE_SIZE as usize
+    }
+
     fn alloc_queue_mem(&mut self, layout: &VirtqueueLayout) -> Result<&mut [u8], Error> {
         // VDUSE requires that memory should be allocated with an associated fd,
         // so we use the same approach as vhost-user, allocating the virtqueues

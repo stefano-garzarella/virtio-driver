@@ -557,6 +557,10 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
         self.device.iommu().max_num_mappings().into()
     }
 
+    fn mem_region_alignment(&self) -> usize {
+        self.device.iommu().alignment()
+    }
+
     fn alloc_queue_mem(&mut self, layout: &VirtqueueLayout) -> io::Result<&mut [u8]> {
         if self.queue_memory.is_some() {
             return Err(io::Error::new(
@@ -565,7 +569,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
             ));
         }
 
-        let alignment = self.device.iommu().alignment();
+        let alignment = self.mem_region_alignment();
 
         // TODO This assumes that all virtqueues have the same queue_size
         let mem_size = layout

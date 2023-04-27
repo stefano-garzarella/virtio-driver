@@ -169,6 +169,10 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
         self.max_mem_regions
     }
 
+    fn mem_region_alignment(&self) -> usize {
+        1
+    }
+
     fn alloc_queue_mem(&mut self, layout: &VirtqueueLayout) -> Result<&mut [u8], Error> {
         if self.mmap.is_some() {
             return Err(Error::new(

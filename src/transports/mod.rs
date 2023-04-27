@@ -49,6 +49,9 @@ pub trait VirtioTransport<C: ByteValued, R: Copy>: Send + Sync {
     /// Returns the maximum number of memory regions supported by the transport.
     fn max_mem_regions(&self) -> u64;
 
+    /// Returns the alignment requirement in bytes of the memory region
+    fn mem_region_alignment(&self) -> usize;
+
     /// Allocates or maps the memory to store the virtqueues in.
     ///
     /// This memory must be accessible by the device and is also used for additional per-request
