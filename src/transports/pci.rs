@@ -408,7 +408,7 @@ impl<C: ByteValued, R: Copy> Pci<C, R> {
                 .iommu()
                 .valid_iova_ranges()
                 .iter()
-                .map(|r| Iova(r.start)..Iova(r.end)),
+                .map(|r| Iova(r.start)..=Iova(r.end - 1)),
         );
 
         Ok(Pci {
