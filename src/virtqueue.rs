@@ -2,11 +2,13 @@
 
 //! A virtqueue implementation to be used internally by virtio device drivers.
 
+mod packed;
 mod split;
 
 use crate::{Iova, IovaTranslator, Le16, VirtioFeatureFlags};
 use bitflags::bitflags;
 use libc::iovec;
+use packed::VirtqueuePacked;
 use split::VirtqueueSplit;
 use std::io::{Error, ErrorKind};
 use std::mem;
@@ -41,10 +43,16 @@ impl VirtqueueLayout {
         features: VirtioFeatureFlags,
     ) -> Result<Self, Error> {
         if features.contains(VirtioFeatureFlags::RING_PACKED) {
-            Err(Error::new(
-                ErrorKind::InvalidInput,
-                "packed ring not supported",
-            ))
+            let desc_bytes = mem::size_of::<packed::VirtqueueDescriptor>() * queue_size;
+            let event_suppress_bytes = mem::size_of::<packed::VirtqueueEventSuppress>();
+
+            Self::new_layout::<R>(
+                num_queues,
+                queue_size,
+                desc_bytes,
+                event_suppress_bytes,
+                event_suppress_bytes,
+            )
         } else {
             let desc_bytes = mem::size_of::<split::VirtqueueDescriptor>() * queue_size;
             let avail_bytes = 8 + mem::size_of::<Le16>() * queue_size;
@@ -185,10 +193,27 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
         let layout = VirtqueueLayout::new::<R>(1, queue_size as usize, features)?;
         let event_idx_enabled = features.contains(VirtioFeatureFlags::RING_EVENT_IDX);
         let (format, req_mem) = if features.contains(VirtioFeatureFlags::RING_PACKED) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "packed ring not supported",
-            ));
+            let mem = buf.get_mut(0..layout.end_offset).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    "Incorrectly sized queue bu
+fer",
+                )
+            })?;
+
+            let (mem, req_mem) = mem.split_at_mut(layout.req_offset);
+            let (mem, device_es_mem) = mem.split_at_mut(layout.device_area_offset);
+            let (desc_mem, driver_es_mem) = mem.split_at_mut(layout.driver_area_offset);
+
+            let format: Box<dyn VirtqueueFormat + 'a> = Box::new(VirtqueuePacked::new(
+                desc_mem,
+                driver_es_mem,
+                device_es_mem,
+                queue_size,
+                event_idx_enabled,
+            )?);
+
+            (format, req_mem)
         } else {
             let mem = buf.get_mut(0..layout.end_offset).ok_or_else(|| {
                 Error::new(ErrorKind::InvalidInput, "Incorrectly sized queue buffer")
