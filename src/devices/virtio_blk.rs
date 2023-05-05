@@ -262,9 +262,8 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
             ));
         }
 
+        let features = VirtioFeatureFlags::from_bits_truncate(transport.get_features());
         let layout = VirtqueueLayout::new::<VirtioBlkReqBuf>(num_queues, queue_size as usize)?;
-        let event_idx_enabled =
-            transport.get_features() & VirtioFeatureFlags::RING_EVENT_IDX.bits() != 0;
         let queues: Vec<_> = {
             // Not actually needless: must drop the borrow on the transport before alloc_queue_mem()
             #[allow(clippy::needless_collect)]
@@ -284,7 +283,7 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
                             layout.end_offset,
                         )
                     };
-                    Virtqueue::new(iova_translator, mem_queue, queue_size, event_idx_enabled)
+                    Virtqueue::new(iova_translator, mem_queue, queue_size, features)
                 })
                 .collect::<Result<_, _>>()?
         };

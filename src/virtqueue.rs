@@ -2,7 +2,7 @@
 
 //! A virtqueue implementation to be used internally by virtio device drivers.
 
-use crate::{Iova, IovaTranslator, Le16, Le32, Le64};
+use crate::{Iova, IovaTranslator, Le16, Le32, Le64, VirtioFeatureFlags};
 use bitflags::bitflags;
 use libc::iovec;
 use std::io::{Error, ErrorKind};
@@ -242,9 +242,10 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
         iova_translator: Box<dyn IovaTranslator>,
         buf: &'a mut [u8],
         queue_size: u16,
-        event_idx_enabled: bool,
+        features: VirtioFeatureFlags,
     ) -> Result<Self, Error> {
         let layout = VirtqueueLayout::new::<R>(1, queue_size as usize)?;
+        let event_idx_enabled = features.contains(VirtioFeatureFlags::RING_EVENT_IDX);
         let mem = buf
             .get_mut(0..layout.end_offset)
             .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Incorrectly sized queue buffer"))?;
