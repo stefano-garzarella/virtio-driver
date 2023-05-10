@@ -283,7 +283,7 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
             req,
             first_free_desc: 0,
             event_idx_enabled,
-            used_notif_enabled: true,
+            used_notif_enabled: false,
             old_avail_idx: Wrapping(0),
         })
     }
@@ -431,8 +431,8 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
     }
 
     pub fn set_used_notif_enabled(&mut self, enabled: bool) {
+        self.used_notif_enabled = enabled;
         if self.event_idx_enabled {
-            self.used_notif_enabled = enabled;
             self.update_used_event();
         } else {
             self.avail.store_flags(!enabled as u16);
