@@ -9,7 +9,7 @@ use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
 use std::num::Wrapping;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{fence, AtomicU16, Ordering};
 
 /// This is `struct virtq_desc` from the VIRTIO 1.1 specification (see 2.6.5).
 #[repr(C, packed)]
@@ -403,9 +403,14 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
                 } else {
                     (self.used.next_idx - Wrapping(1)).0.to_le()
                 },
-                Ordering::Release,
+                Ordering::Relaxed,
             )
         };
+
+        // Store avail.event before loading used.idx in has_next(). The device follows the opposite
+        // order: store used.idx before loading avail.event. This scheme ensures that the driver
+        // never misses a used buffer added by the device.
+        fence(Ordering::SeqCst);
     }
 
     pub fn avail_notif_needed(&mut self) -> bool {
