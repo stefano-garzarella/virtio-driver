@@ -401,16 +401,7 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
     }
 
     fn update_used_event(&self) {
-        unsafe {
-            (*self.avail.event).store(
-                if self.used_notif_enabled {
-                    self.used.next_idx.0.to_le()
-                } else {
-                    (self.used.next_idx - Wrapping(1)).0.to_le()
-                },
-                Ordering::Relaxed,
-            )
-        };
+        unsafe { (*self.avail.event).store(self.used.next_idx.0.to_le(), Ordering::Relaxed) };
 
         // Store avail.event before loading used.idx in has_next(). The device follows the opposite
         // order: store used.idx before loading avail.event. This scheme ensures that the driver
@@ -465,9 +456,6 @@ impl<'a, 'queue, R: Copy> Iterator for VirtqueueIter<'a, 'queue, R> {
             let req = unsafe { *self.virtqueue.req.offset(idx as isize) };
             Some(VirtqueueCompletion { idx, req })
         } else {
-            if self.virtqueue.event_idx_enabled && !self.virtqueue.used_notif_enabled {
-                self.virtqueue.update_used_event();
-            }
             None
         }
     }
