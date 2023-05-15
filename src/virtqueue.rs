@@ -176,7 +176,12 @@ impl<'a, T: Clone> VirtqueueRing<'a, T> {
     }
 
     fn load_event(&self) -> u16 {
-        unsafe { u16::from_le((*self.event).load(Ordering::Acquire)) }
+        // Load used.event after storing avail.idx. The device follows the opposite order: load
+        // avail.idx after storing used.event. This scheme ensures that the device never misses an
+        // available buffer added by the driver.
+        fence(Ordering::SeqCst);
+
+        unsafe { u16::from_le((*self.event).load(Ordering::Relaxed)) }
     }
 
     fn load_flags(&self) -> u16 {
