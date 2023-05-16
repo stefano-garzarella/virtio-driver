@@ -149,8 +149,8 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
         vhost.set_vring_addr(
             i,
             q.desc_table_ptr() as u64,
-            q.used_ring_ptr() as u64,
-            q.avail_ring_ptr() as u64,
+            q.device_area_ptr() as u64,
+            q.driver_area_ptr() as u64,
         )?;
 
         vhost.set_vring_kick(i, self.eventfd_kick[i].as_raw_fd())?;

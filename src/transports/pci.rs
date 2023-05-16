@@ -451,21 +451,21 @@ impl<C: ByteValued, R: Copy> Pci<C, R> {
 
             self.set_64_bit_iova_register(
                 queue.desc_table_ptr(),
-                queue_layout.avail_offset,
+                queue_layout.driver_area_offset,
                 common_cfg.queue_desc_lower(),
                 common_cfg.queue_desc_upper(),
             )?;
 
             self.set_64_bit_iova_register(
-                queue.avail_ring_ptr(),
-                queue_layout.used_offset - queue_layout.avail_offset,
+                queue.driver_area_ptr(),
+                queue_layout.device_area_offset - queue_layout.driver_area_offset,
                 common_cfg.queue_driver_lower(),
                 common_cfg.queue_driver_upper(),
             )?;
 
             self.set_64_bit_iova_register(
-                queue.used_ring_ptr(),
-                queue_layout.req_offset - queue_layout.used_offset,
+                queue.device_area_ptr(),
+                queue_layout.req_offset - queue_layout.device_area_offset,
                 common_cfg.queue_device_lower(),
                 common_cfg.queue_device_upper(),
             )?;

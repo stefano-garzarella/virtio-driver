@@ -126,18 +126,18 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
         vdpa.set_vring_base(queue_idx, 0)?;
 
         let Iova(desc_user_addr) = iova_space
-            .translate(q.desc_table_ptr() as usize, q_layout.avail_offset)
+            .translate(q.desc_table_ptr() as usize, q_layout.driver_area_offset)
             .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Descriptor table is not mapped"))?;
         let Iova(used_user_addr) = iova_space
             .translate(
-                q.used_ring_ptr() as usize,
-                q_layout.req_offset - q_layout.used_offset,
+                q.device_area_ptr() as usize,
+                q_layout.req_offset - q_layout.device_area_offset,
             )
             .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Used ring is not mapped"))?;
         let Iova(avail_user_addr) = iova_space
             .translate(
-                q.avail_ring_ptr() as usize,
-                q_layout.used_offset - q_layout.avail_offset,
+                q.driver_area_ptr() as usize,
+                q_layout.device_area_offset - q_layout.driver_area_offset,
             )
             .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Available ring is not mapped"))?;
 

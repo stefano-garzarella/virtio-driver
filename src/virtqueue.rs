@@ -39,37 +39,59 @@ struct VirtqueueUsedElem {
 
 /// A description how the memory passed for each virtqueue is split into individual regions.
 ///
-/// * The Virtqueue Descriptor Table starts from offset 0
-/// * The Virtqueue Available Ring starts at `avail_offset`
-/// * The Virtqueue Used Ring starts at `used_offset`
+/// * The Virtqueue Descriptor Area starts from offset 0
+/// * The Virtqueue Driver Area (Available Ring for split virtqueue) starts at `driver_area_offset`
+/// * The Virtqueue Device Area (Used Ring for split virtqueue) starts at `device_area_offset`
 /// * Driver-specific per request data that needs to be shared with the device (e.g. request
 ///   headers or status bytes) start at `req_offset`
 pub struct VirtqueueLayout {
     pub num_queues: usize,
-    pub avail_offset: usize,
-    pub used_offset: usize,
+    pub driver_area_offset: usize,
+    pub device_area_offset: usize,
     pub req_offset: usize,
     pub end_offset: usize,
 }
 
 impl VirtqueueLayout {
-    pub fn new<R>(num_queues: usize, queue_size: usize) -> Result<Self, Error> {
-        let desc_bytes = mem::size_of::<VirtqueueDescriptor>() * queue_size;
-        let avail_bytes = 8 + mem::size_of::<Le16>() * queue_size;
-        let used_bytes = 8 + mem::size_of::<VirtqueueUsedElem>() * queue_size;
-        let req_bytes = mem::size_of::<R>() * queue_size;
+    pub fn new<R>(
+        num_queues: usize,
+        queue_size: usize,
+        features: VirtioFeatureFlags,
+    ) -> Result<Self, Error> {
+        if features.contains(VirtioFeatureFlags::RING_PACKED) {
+            Err(Error::new(
+                ErrorKind::InvalidInput,
+                "packed ring not supported",
+            ))
+        } else {
+            let desc_bytes = mem::size_of::<VirtqueueDescriptor>() * queue_size;
+            let avail_bytes = 8 + mem::size_of::<Le16>() * queue_size;
+            let used_bytes = 8 + mem::size_of::<VirtqueueUsedElem>() * queue_size;
 
-        // Check queue size requirements (see 2.6 in the VIRTIO 1.1 spec)
-        if !queue_size.is_power_of_two() || queue_size > 32768 {
-            return Err(Error::new(ErrorKind::InvalidInput, "Invalid queue size"));
+            // Check queue size requirements (see 2.6 in the VIRTIO 1.1 spec)
+            if !queue_size.is_power_of_two() || queue_size > 32768 {
+                return Err(Error::new(ErrorKind::InvalidInput, "Invalid queue size"));
+            }
+
+            // The used ring requires an alignment of 4 (see 2.6 in the VIRTIO 1.1 spec)
+            let avail_bytes = (avail_bytes + 3) & !0x3;
+
+            Self::new_layout::<R>(num_queues, queue_size, desc_bytes, avail_bytes, used_bytes)
         }
+    }
 
-        // The used ring requires an alignment of 4 (see 2.6 in the VIRTIO 1.1 spec)
-        let avail_bytes = (avail_bytes + 3) & !0x3;
+    fn new_layout<R>(
+        num_queues: usize,
+        queue_size: usize,
+        desc_bytes: usize,
+        driver_area_bytes: usize,
+        device_area_bytes: usize,
+    ) -> Result<Self, Error> {
+        let req_bytes = mem::size_of::<R>() * queue_size;
 
         // Consider the required alignment of R
         let req_align = mem::align_of::<R>();
-        let req_offset = desc_bytes + avail_bytes + used_bytes;
+        let req_offset = desc_bytes + driver_area_bytes + device_area_bytes;
         let req_offset_aligned = (req_offset + req_align - 1) & !(req_align - 1);
 
         // Maintain 16-byte descriptor table alignment (see 2.7 in the VIRTIO 1.1 spec) in
@@ -78,8 +100,8 @@ impl VirtqueueLayout {
 
         Ok(VirtqueueLayout {
             num_queues,
-            avail_offset: desc_bytes,
-            used_offset: desc_bytes + avail_bytes,
+            driver_area_offset: desc_bytes,
+            device_area_offset: desc_bytes + driver_area_bytes,
             req_offset: req_offset_aligned,
             end_offset,
         })
@@ -244,15 +266,15 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
         queue_size: u16,
         features: VirtioFeatureFlags,
     ) -> Result<Self, Error> {
-        let layout = VirtqueueLayout::new::<R>(1, queue_size as usize)?;
+        let layout = VirtqueueLayout::new::<R>(1, queue_size as usize, features)?;
         let event_idx_enabled = features.contains(VirtioFeatureFlags::RING_EVENT_IDX);
         let mem = buf
             .get_mut(0..layout.end_offset)
             .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Incorrectly sized queue buffer"))?;
 
         let (mem, req_mem) = mem.split_at_mut(layout.req_offset);
-        let (mem, used_mem) = mem.split_at_mut(layout.used_offset);
-        let (desc_mem, avail_mem) = mem.split_at_mut(layout.avail_offset);
+        let (mem, used_mem) = mem.split_at_mut(layout.device_area_offset);
+        let (desc_mem, avail_mem) = mem.split_at_mut(layout.driver_area_offset);
 
         let avail = VirtqueueRing::new(avail_mem, queue_size as usize);
         let used = VirtqueueRing::new(used_mem, queue_size as usize);
@@ -306,13 +328,13 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
         self.desc.as_ptr() as *const u8
     }
 
-    /// Returns a raw pointer to the start of the available ring.
-    pub fn avail_ring_ptr(&self) -> *const u8 {
+    /// Returns a raw pointer to the start of the driver area.
+    pub fn driver_area_ptr(&self) -> *const u8 {
         self.avail.ptr as *const u8
     }
 
-    /// Returns a raw pointer to the start of the used ring.
-    pub fn used_ring_ptr(&self) -> *const u8 {
+    /// Returns a raw pointer to the start of the device area.
+    pub fn device_area_ptr(&self) -> *const u8 {
         self.used.ptr as *const u8
     }
 

@@ -263,7 +263,8 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
         }
 
         let features = VirtioFeatureFlags::from_bits_truncate(transport.get_features());
-        let layout = VirtqueueLayout::new::<VirtioBlkReqBuf>(num_queues, queue_size as usize)?;
+        let layout =
+            VirtqueueLayout::new::<VirtioBlkReqBuf>(num_queues, queue_size as usize, features)?;
         let queues: Vec<_> = {
             // Not actually needless: must drop the borrow on the transport before alloc_queue_mem()
             #[allow(clippy::needless_collect)]
