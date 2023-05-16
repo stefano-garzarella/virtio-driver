@@ -545,7 +545,7 @@ impl<'queue, C> Iterator for CompletionIter<'_, 'queue, C> {
         let completion = self.it.next()?;
 
         // If the backend sent a completion for a request we never made, just ignore it.
-        let context = self.req_contexts[completion.idx as usize].take()?;
+        let context = self.req_contexts[completion.id as usize].take()?;
 
         Some(Completion {
             context,

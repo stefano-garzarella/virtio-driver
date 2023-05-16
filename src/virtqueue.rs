@@ -217,6 +217,233 @@ impl<'a, T: Clone> VirtqueueRing<'a, T> {
     }
 }
 
+/// An interface for the virtqueue formats supported by VIRTIO specification.
+trait VirtqueueFormat {
+    /// Returns the number of entries of the descriptor table.
+    fn queue_size(&self) -> u16;
+
+    /// Returns a raw pointer to the start of the descriptor table.
+    fn desc_table_ptr(&self) -> *const u8;
+
+    /// Returns a raw pointer to the start of the device area.
+    fn driver_area_ptr(&self) -> *const u8;
+
+    /// Returns a raw pointer to the start of the driver area.
+    fn device_area_ptr(&self) -> *const u8;
+
+    /// Returns an identifier for the next chain of the available descriptor.
+    fn avail_start_chain(&mut self) -> Option<u16>;
+
+    /// Rewinds the last chain if there were any errors during building.
+    ///
+    /// `chain_id` is the identifier returned by `avail_start_chain()`.
+    fn avail_rewind_chain(&mut self, chain_id: u16);
+
+    /// Add a descriptor to the current chain and return its index in
+    /// the descriptor table.
+    fn avail_add_desc_chain(
+        &mut self,
+        addr: u64,
+        len: u32,
+        flags: VirtqueueDescriptorFlags,
+    ) -> Result<u16, Error>;
+
+    /// Expose the available descriptor chain to the device.
+    ///
+    /// `chain_id` is the identifier returned by `avail_start_chain()`.
+    /// `last_desc_idx` is the index returned by avail_add_desc_chain() of the
+    /// last descriptor added in the chain.
+    fn avail_publish(&mut self, chain_id: u16, last_desc_idx: u16);
+
+    /// Returns `true` if there are used chains available.
+    fn used_has_next(&self) -> bool;
+
+    /// Returns the identifier of a chain used by the device.
+    fn used_next(&mut self) -> Option<u16>;
+
+    /// Returns lower and upper bound of used chains.
+    fn used_size_hint(&self) -> (usize, Option<usize>);
+
+    /// Returns `true` if the avail notifications are needed.
+    fn avail_notif_needed(&mut self) -> bool;
+
+    /// Enable or disable used notifications.
+    fn set_used_notif_enabled(&mut self, enabled: bool);
+}
+
+struct VirtqueueSplit<'a> {
+    queue_size: u16,
+    avail: VirtqueueRing<'a, Le16>,
+    used: VirtqueueRing<'a, VirtqueueUsedElem>,
+    desc: &'a mut [VirtqueueDescriptor],
+    first_free_desc: u16,
+    event_idx_enabled: bool,
+
+    // Used only when event_idx_enabled is true
+    used_notif_enabled: bool,
+    old_avail_idx: Wrapping<u16>,
+}
+
+impl<'a> VirtqueueSplit<'a> {
+    pub fn new(
+        avail_mem: &'a mut [u8],
+        used_mem: &'a mut [u8],
+        desc_mem: &'a mut [u8],
+        queue_size: u16,
+        event_idx_enabled: bool,
+    ) -> Result<Self, Error> {
+        let avail = VirtqueueRing::new(avail_mem, queue_size as usize);
+        let used = VirtqueueRing::new(used_mem, queue_size as usize);
+
+        let desc: &mut [VirtqueueDescriptor] = unsafe {
+            std::slice::from_raw_parts_mut(
+                desc_mem.as_mut_ptr() as *mut VirtqueueDescriptor,
+                queue_size as usize,
+            )
+        };
+        for i in 0..queue_size - 1 {
+            desc[i as usize].next = (i + 1).into();
+        }
+        desc[(queue_size - 1) as usize].next = NO_FREE_DESC.into();
+
+        Ok(VirtqueueSplit {
+            queue_size,
+            avail,
+            used,
+            desc,
+            first_free_desc: 0,
+            event_idx_enabled,
+            used_notif_enabled: false,
+            old_avail_idx: Wrapping(0),
+        })
+    }
+
+    fn free_desc(&mut self, first_idx: u16) {
+        let mut idx = first_idx as usize;
+        while self.desc[idx].flags.to_native() & VirtqueueDescriptorFlags::NEXT.bits() != 0 {
+            idx = self.desc[idx].next.to_native().into();
+        }
+
+        self.desc[idx].next = self.first_free_desc.into();
+        self.first_free_desc = first_idx;
+    }
+
+    fn update_used_event(&self) {
+        unsafe { (*self.avail.event).store(self.used.next_idx.0.to_le(), Ordering::Relaxed) };
+
+        // Store avail.event before loading used.idx in has_next(). The device follows the opposite
+        // order: store used.idx before loading avail.event. This scheme ensures that the driver
+        // never misses a used buffer added by the device.
+        fence(Ordering::SeqCst);
+    }
+}
+
+impl<'a> VirtqueueFormat for VirtqueueSplit<'a> {
+    fn queue_size(&self) -> u16 {
+        self.queue_size
+    }
+
+    fn desc_table_ptr(&self) -> *const u8 {
+        self.desc.as_ptr() as *const u8
+    }
+
+    fn driver_area_ptr(&self) -> *const u8 {
+        self.avail.ptr as *const u8
+    }
+
+    fn device_area_ptr(&self) -> *const u8 {
+        self.used.ptr as *const u8
+    }
+
+    fn avail_add_desc_chain(
+        &mut self,
+        addr: u64,
+        len: u32,
+        flags: VirtqueueDescriptorFlags,
+    ) -> Result<u16, Error> {
+        let idx = self.first_free_desc;
+        if idx == NO_FREE_DESC {
+            return Err(Error::new(ErrorKind::Other, "Not enough free descriptors"));
+        }
+
+        let next_free_desc = self.desc[idx as usize].next;
+        self.desc[idx as usize] = VirtqueueDescriptor {
+            addr: addr.into(),
+            len: len.into(),
+            flags: flags.bits().into(),
+            next: next_free_desc,
+        };
+        self.first_free_desc = next_free_desc.into();
+
+        Ok(idx)
+    }
+
+    fn avail_start_chain(&mut self) -> Option<u16> {
+        match self.first_free_desc {
+            NO_FREE_DESC => None,
+            idx => Some(idx),
+        }
+    }
+
+    fn avail_rewind_chain(&mut self, chain_id: u16) {
+        self.first_free_desc = chain_id;
+    }
+
+    fn avail_publish(&mut self, chain_id: u16, last_desc_idx: u16) {
+        let mut last_flags = self.desc[last_desc_idx as usize].flags.to_native();
+        last_flags &= !VirtqueueDescriptorFlags::NEXT.bits();
+        self.desc[last_desc_idx as usize].flags = last_flags.into();
+
+        assert!(chain_id < self.queue_size);
+        self.avail.push(chain_id.into());
+        self.avail.store_next_idx();
+    }
+
+    fn used_has_next(&self) -> bool {
+        self.used.has_next()
+    }
+
+    fn used_next(&mut self) -> Option<u16> {
+        if let Some(next) = self.used.pop() {
+            let idx = (next.idx.to_native() % (self.queue_size as u32)) as u16;
+            self.free_desc(idx);
+            if self.event_idx_enabled && self.used_notif_enabled {
+                self.update_used_event();
+            }
+
+            Some(idx)
+        } else {
+            None
+        }
+    }
+
+    fn used_size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.used.num_pending();
+        (len, Some(len))
+    }
+
+    fn avail_notif_needed(&mut self) -> bool {
+        if self.event_idx_enabled {
+            let new_avail_idx = self.avail.next_idx;
+            let ret = new_avail_idx - Wrapping(self.used.load_event()) - Wrapping(1)
+                < new_avail_idx - self.old_avail_idx;
+            self.old_avail_idx = new_avail_idx;
+            ret
+        } else {
+            self.used.load_flags() == 0
+        }
+    }
+
+    fn set_used_notif_enabled(&mut self, enabled: bool) {
+        self.used_notif_enabled = enabled;
+        if self.event_idx_enabled {
+            self.update_used_event();
+        } else {
+            self.avail.store_flags(!enabled as u16);
+        }
+    }
+}
+
 /// A virtqueue of a virtio device.
 ///
 /// `R` is used to store device-specific per-request data (like the request header or status byte)
@@ -224,18 +451,9 @@ impl<'a, T: Clone> VirtqueueRing<'a, T> {
 /// device doesn't have to access, in the interest of both security and performance.
 pub struct Virtqueue<'a, R: Copy> {
     iova_translator: Box<dyn IovaTranslator>,
-    queue_size: u16,
-    avail: VirtqueueRing<'a, Le16>,
-    used: VirtqueueRing<'a, VirtqueueUsedElem>,
-    desc: &'a mut [VirtqueueDescriptor],
+    format: Box<dyn VirtqueueFormat + 'a>,
     req: *mut R,
-    first_free_desc: u16,
     layout: VirtqueueLayout,
-    event_idx_enabled: bool,
-
-    // Used only when event_idx_enabled is true
-    used_notif_enabled: bool,
-    old_avail_idx: Wrapping<u16>,
 }
 
 // `Send` and `Sync` are not implemented automatically due to the `avail`, `used`, and `req` fields.
@@ -244,10 +462,10 @@ unsafe impl<R: Copy> Sync for Virtqueue<'_, R> {}
 
 /// The result of a completed request
 pub struct VirtqueueCompletion<R> {
-    /// The index of the first descriptor of the request as returned by [`add_request`].
+    /// The identifier of the descriptors chain for the request as returned by [`add_request`].
     ///
     /// [`add_request`]: Virtqueue::add_request
-    pub idx: u16,
+    pub id: u16,
 
     /// Device-specific per-request data like the request header or status byte.
     pub req: R,
@@ -268,27 +486,30 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
     ) -> Result<Self, Error> {
         let layout = VirtqueueLayout::new::<R>(1, queue_size as usize, features)?;
         let event_idx_enabled = features.contains(VirtioFeatureFlags::RING_EVENT_IDX);
-        let mem = buf
-            .get_mut(0..layout.end_offset)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Incorrectly sized queue buffer"))?;
+        let (format, req_mem) = if features.contains(VirtioFeatureFlags::RING_PACKED) {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "packed ring not supported",
+            ));
+        } else {
+            let mem = buf.get_mut(0..layout.end_offset).ok_or_else(|| {
+                Error::new(ErrorKind::InvalidInput, "Incorrectly sized queue buffer")
+            })?;
 
-        let (mem, req_mem) = mem.split_at_mut(layout.req_offset);
-        let (mem, used_mem) = mem.split_at_mut(layout.device_area_offset);
-        let (desc_mem, avail_mem) = mem.split_at_mut(layout.driver_area_offset);
+            let (mem, req_mem) = mem.split_at_mut(layout.req_offset);
+            let (mem, used_mem) = mem.split_at_mut(layout.device_area_offset);
+            let (desc_mem, avail_mem) = mem.split_at_mut(layout.driver_area_offset);
 
-        let avail = VirtqueueRing::new(avail_mem, queue_size as usize);
-        let used = VirtqueueRing::new(used_mem, queue_size as usize);
+            let format: Box<dyn VirtqueueFormat + 'a> = Box::new(VirtqueueSplit::new(
+                avail_mem,
+                used_mem,
+                desc_mem,
+                queue_size,
+                event_idx_enabled,
+            )?);
 
-        let desc: &mut [VirtqueueDescriptor] = unsafe {
-            std::slice::from_raw_parts_mut(
-                desc_mem.as_mut_ptr() as *mut VirtqueueDescriptor,
-                queue_size as usize,
-            )
+            (format, req_mem)
         };
-        for i in 0..queue_size - 1 {
-            desc[i as usize].next = (i + 1).into();
-        }
-        desc[(queue_size - 1) as usize].next = NO_FREE_DESC.into();
 
         let req = req_mem.as_mut_ptr() as *mut R;
         if req.align_offset(mem::align_of::<R>()) != 0 {
@@ -300,22 +521,15 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
 
         Ok(Virtqueue {
             iova_translator,
-            queue_size,
-            desc,
-            avail,
-            used,
+            format,
             req,
-            first_free_desc: 0,
             layout,
-            event_idx_enabled,
-            used_notif_enabled: false,
-            old_avail_idx: Wrapping(0),
         })
     }
 
     /// Returns the number of entries in each of the descriptor table and rings.
     pub fn queue_size(&self) -> u16 {
-        self.queue_size
+        self.format.queue_size()
     }
 
     /// Returns the virtqueue memory layout.
@@ -325,47 +539,17 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
 
     /// Returns a raw pointer to the start of the descriptor table.
     pub fn desc_table_ptr(&self) -> *const u8 {
-        self.desc.as_ptr() as *const u8
+        self.format.desc_table_ptr()
     }
 
     /// Returns a raw pointer to the start of the driver area.
     pub fn driver_area_ptr(&self) -> *const u8 {
-        self.avail.ptr as *const u8
+        self.format.driver_area_ptr()
     }
 
     /// Returns a raw pointer to the start of the device area.
     pub fn device_area_ptr(&self) -> *const u8 {
-        self.used.ptr as *const u8
-    }
-
-    fn add_avail(&mut self, desc: &[u16]) {
-        for &d in desc {
-            assert!(d < self.queue_size);
-            self.avail.push(d.into())
-        }
-
-        self.avail.store_next_idx();
-    }
-
-    fn add_desc(&mut self, iovec: iovec, flags: VirtqueueDescriptorFlags) -> Result<u16, Error> {
-        let idx = self.first_free_desc;
-        if idx == NO_FREE_DESC {
-            return Err(Error::new(ErrorKind::Other, "Not enough free descriptors"));
-        }
-
-        let Iova(iova) = self
-            .iova_translator
-            .translate_addr(iovec.iov_base as usize, iovec.iov_len)?;
-
-        let next_free_desc = self.desc[idx as usize].next;
-        self.desc[idx as usize] = VirtqueueDescriptor {
-            addr: iova.into(),
-            len: (iovec.iov_len as u32).into(),
-            flags: flags.bits().into(),
-            next: next_free_desc,
-        };
-        self.first_free_desc = next_free_desc.into();
-        Ok(idx)
+        self.format.device_area_ptr()
     }
 
     /// Enqueues a new request.
@@ -382,15 +566,15 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
     where
         F: FnOnce(&mut R, &mut dyn FnMut(iovec, bool) -> Result<(), Error>) -> Result<(), Error>,
     {
-        let first_idx = match self.first_free_desc {
-            NO_FREE_DESC => {
+        let chain_id = match self.format.avail_start_chain() {
+            None => {
                 return Err(Error::new(ErrorKind::Other, "Not enough free descriptors"));
             }
-            idx => idx,
+            Some(idx) => idx,
         };
 
-        let req_ptr = unsafe { &mut *self.req.offset(first_idx as isize) };
-        let mut last_idx: Option<u16> = None;
+        let req_ptr = unsafe { &mut *self.req.offset(chain_id as isize) };
+        let mut last_desc_idx: Option<u16> = None;
 
         let res = prepare(req_ptr, &mut |iovec: iovec, from_dev: bool| {
             // Set NEXT for all descriptors, it is unset again below for the last one
@@ -398,31 +582,24 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
             if from_dev {
                 flags.insert(VirtqueueDescriptorFlags::WRITE);
             }
-            last_idx = Some(self.add_desc(iovec, flags)?);
+            let Iova(iova) = self
+                .iova_translator
+                .translate_addr(iovec.iov_base as usize, iovec.iov_len)?;
+            last_desc_idx = Some(self.format.avail_add_desc_chain(
+                iova,
+                iovec.iov_len as u32,
+                flags,
+            )?);
             Ok(())
         });
 
         if let Err(e) = res {
-            self.first_free_desc = first_idx;
+            self.format.avail_rewind_chain(chain_id);
             return Err(e);
         }
 
-        let mut last_flags = self.desc[last_idx.unwrap() as usize].flags.to_native();
-        last_flags &= !VirtqueueDescriptorFlags::NEXT.bits();
-        self.desc[last_idx.unwrap() as usize].flags = last_flags.into();
-
-        self.add_avail(&[first_idx]);
-        Ok(first_idx)
-    }
-
-    fn free_desc(&mut self, first_idx: u16) {
-        let mut idx = first_idx as usize;
-        while self.desc[idx].flags.to_native() & VirtqueueDescriptorFlags::NEXT.bits() != 0 {
-            idx = self.desc[idx].next.to_native().into();
-        }
-
-        self.desc[idx].next = self.first_free_desc.into();
-        self.first_free_desc = first_idx;
+        self.format.avail_publish(chain_id, last_desc_idx.unwrap());
+        Ok(chain_id)
     }
 
     /// Returns an iterator that returns all completed requests.
@@ -430,34 +607,12 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
         VirtqueueIter { virtqueue: self }
     }
 
-    fn update_used_event(&self) {
-        unsafe { (*self.avail.event).store(self.used.next_idx.0.to_le(), Ordering::Relaxed) };
-
-        // Store avail.event before loading used.idx in has_next(). The device follows the opposite
-        // order: store used.idx before loading avail.event. This scheme ensures that the driver
-        // never misses a used buffer added by the device.
-        fence(Ordering::SeqCst);
-    }
-
     pub fn avail_notif_needed(&mut self) -> bool {
-        if self.event_idx_enabled {
-            let new_avail_idx = self.avail.next_idx;
-            let ret = new_avail_idx - Wrapping(self.used.load_event()) - Wrapping(1)
-                < new_avail_idx - self.old_avail_idx;
-            self.old_avail_idx = new_avail_idx;
-            ret
-        } else {
-            self.used.load_flags() == 0
-        }
+        self.format.avail_notif_needed()
     }
 
     pub fn set_used_notif_enabled(&mut self, enabled: bool) {
-        self.used_notif_enabled = enabled;
-        if self.event_idx_enabled {
-            self.update_used_event();
-        } else {
-            self.avail.store_flags(!enabled as u16);
-        }
+        self.format.set_used_notif_enabled(enabled)
     }
 }
 
@@ -468,7 +623,7 @@ pub struct VirtqueueIter<'a, 'queue, R: Copy> {
 
 impl<R: Copy> VirtqueueIter<'_, '_, R> {
     pub fn has_next(&self) -> bool {
-        self.virtqueue.used.has_next()
+        self.virtqueue.format.used_has_next()
     }
 }
 
@@ -476,22 +631,13 @@ impl<'a, 'queue, R: Copy> Iterator for VirtqueueIter<'a, 'queue, R> {
     type Item = VirtqueueCompletion<R>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(next) = self.virtqueue.used.pop() {
-            let idx = (next.idx.to_native() % (self.virtqueue.queue_size as u32)) as u16;
-            self.virtqueue.free_desc(idx);
-            if self.virtqueue.event_idx_enabled && self.virtqueue.used_notif_enabled {
-                self.virtqueue.update_used_event();
-            }
+        let id = self.virtqueue.format.used_next()?;
 
-            let req = unsafe { *self.virtqueue.req.offset(idx as isize) };
-            Some(VirtqueueCompletion { idx, req })
-        } else {
-            None
-        }
+        let req = unsafe { *self.virtqueue.req.offset(id as isize) };
+        Some(VirtqueueCompletion { id, req })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.virtqueue.used.num_pending();
-        (len, Some(len))
+        self.virtqueue.format.used_size_hint()
     }
 }
