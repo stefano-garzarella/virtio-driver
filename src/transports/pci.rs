@@ -4,7 +4,6 @@
 //!
 //! TODO: Possibly support in the future:
 //!   - Legacy devices.
-//!   - Packed virtqueues.
 //!   - INTx, for when device does not support MSI-X.
 //!   - Cases where fewer than #queues MSI-X interrupts are available, which would require sharing
 //!     vectors among queues.
@@ -234,6 +233,7 @@ fn negotiate_features(common_cfg: &VirtioPciCommonCfg, driver_features: u64) -> 
 
     let driver_features = driver_features
         | (VirtioFeatureFlags::VERSION_1
+            | VirtioFeatureFlags::RING_PACKED
             | VirtioFeatureFlags::ACCESS_PLATFORM
             | VirtioFeatureFlags::ORDER_PLATFORM)
             .bits();
