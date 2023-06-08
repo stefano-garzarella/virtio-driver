@@ -11,7 +11,7 @@
 
 use std::fs::File;
 use std::io::{IoSlice, IoSliceMut, Result};
-use std::mem::size_of;
+use std::mem::{size_of, size_of_val};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixDatagram, UnixStream};
 use std::ptr::{copy_nonoverlapping, null_mut, write_unaligned};
@@ -107,7 +107,7 @@ impl CmsgBuffer {
 }
 
 fn raw_sendmsg<D: IntoIobuf>(fd: RawFd, out_data: &[D], out_fds: &[RawFd]) -> Result<usize> {
-    let cmsg_capacity = CMSG_SPACE!(size_of::<RawFd>() * out_fds.len());
+    let cmsg_capacity = CMSG_SPACE!(size_of_val(out_fds));
     let mut cmsg_buffer = CmsgBuffer::with_capacity(cmsg_capacity);
 
     let iovec = IntoIobuf::as_iobufs(out_data);
@@ -124,7 +124,7 @@ fn raw_sendmsg<D: IntoIobuf>(fd: RawFd, out_data: &[D], out_fds: &[RawFd]) -> Re
 
     if !out_fds.is_empty() {
         let cmsg = cmsghdr {
-            cmsg_len: CMSG_LEN!(size_of::<RawFd>() * out_fds.len()),
+            cmsg_len: CMSG_LEN!(size_of_val(out_fds)),
             cmsg_level: SOL_SOCKET,
             cmsg_type: SCM_RIGHTS,
         };
@@ -156,7 +156,7 @@ fn raw_sendmsg<D: IntoIobuf>(fd: RawFd, out_data: &[D], out_fds: &[RawFd]) -> Re
 }
 
 fn raw_recvmsg(fd: RawFd, in_data: &mut [u8], in_fds: &mut [RawFd]) -> Result<(usize, usize)> {
-    let cmsg_capacity = CMSG_SPACE!(size_of::<RawFd>() * in_fds.len());
+    let cmsg_capacity = CMSG_SPACE!(size_of_val(in_fds));
     let mut cmsg_buffer = CmsgBuffer::with_capacity(cmsg_capacity);
 
     let mut iovec = iovec {
