@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 
-#![cfg_attr(feature = "_unsafe-op-in-unsafe-fn", allow(unsafe_op_in_unsafe_fn))]
+#![allow(unsafe_op_in_unsafe_fn)]
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 

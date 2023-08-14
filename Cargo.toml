@@ -14,7 +14,6 @@ default = []
 pci = ["pci-driver"]
 vhost-user = ["memmap2", "rustix/fs"]
 vhost-vdpa = ["memmap2", "rustix/fs", "virtio-bindings"]
-_unsafe-op-in-unsafe-fn = []
 
 [dependencies]
 bitflags = "1.2"
