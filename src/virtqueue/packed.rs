@@ -137,7 +137,9 @@ impl Default for Used {
 pub struct VirtqueuePacked<'a> {
     desc: &'a mut [VirtqueueDescriptor],
     driver: &'a mut VirtqueueEventSuppress,
-    device: &'a mut VirtqueueEventSuppress,
+    // `device` area can be written by the device, so we can't use exclusive
+    // reference.
+    device: *mut VirtqueueEventSuppress,
 
     queue_size: u16,
     queue_avail: u16,
@@ -369,7 +371,9 @@ impl<'a> VirtqueueFormat for VirtqueuePacked<'a> {
         // notification suppressions.
         fence(Ordering::SeqCst);
 
-        let flags = VirtqueueEventSuppressFlags::from_bits_truncate(self.device.flags.into());
+        // SAFETY: Safe because we check the `self.device` address and size in `VirtqueuePacked::new()`
+        let flags =
+            unsafe { VirtqueueEventSuppressFlags::from_bits_truncate((*self.device).flags.into()) };
 
         if flags.contains(VirtqueueEventSuppressFlags::EVENT_DISABLE) {
             return false;
@@ -383,7 +387,8 @@ impl<'a> VirtqueueFormat for VirtqueuePacked<'a> {
         let old_avail_idx = new_avail_idx - Wrapping(self.avail.pending);
         self.avail.pending = 0;
 
-        let off_wrap: u16 = self.device.off_wrap.into();
+        // SAFETY: Safe because we check the `self.device` address and size in `VirtqueuePacked::new()`
+        let off_wrap: u16 = unsafe { (*self.device).off_wrap.into() };
         let wrap_counter: bool = (off_wrap >> VRING_PACKED_EVENT_F_WRAP_CTR) == 1;
         let mut event_idx = Wrapping(off_wrap & !(1 << VRING_PACKED_EVENT_F_WRAP_CTR));
 
