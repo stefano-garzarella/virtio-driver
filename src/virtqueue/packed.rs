@@ -159,19 +159,34 @@ impl<'a> VirtqueuePacked<'a> {
         queue_size: u16,
         event_idx_enabled: bool,
     ) -> Result<Self, Error> {
+        let desc_ptr = desc_mem.as_mut_ptr();
+        // 16 bytes alignment requirement from section 2.8.10.1
+        // "Structure Size and Alignment" in VIRTIO 1.2 specification
+        assert_eq!(desc_ptr.align_offset(16), 0);
         assert!(desc_mem.len() >= queue_size as usize * mem::size_of::<VirtqueueDescriptor>());
+        // SAFETY: Safe because we just checked the size and alignment
         let desc: &mut [VirtqueueDescriptor] = unsafe {
             std::slice::from_raw_parts_mut(
-                desc_mem.as_mut_ptr() as *mut VirtqueueDescriptor,
+                desc_ptr as *mut VirtqueueDescriptor,
                 queue_size as usize,
             )
         };
 
+        let driver_es_ptr = driver_es_mem.as_mut_ptr();
+        // 4 bytes alignment requirement from section 2.8.10.1
+        // "Structure Size and Alignment" in VIRTIO 1.2 specification
+        assert_eq!(driver_es_ptr.align_offset(4), 0);
         assert!(driver_es_mem.len() >= mem::size_of::<VirtqueueEventSuppress>());
-        let driver = unsafe { &mut *(driver_es_mem.as_mut_ptr() as *mut VirtqueueEventSuppress) };
+        // SAFETY: Safe because we just checked the size and alignment
+        let driver = unsafe { &mut *(driver_es_ptr as *mut VirtqueueEventSuppress) };
 
+        let device_es_ptr = device_es_mem.as_mut_ptr();
+        // 4 bytes alignment requirement from section 2.8.10.1
+        // "Structure Size and Alignment" in VIRTIO 1.2 specification
+        assert_eq!(device_es_ptr.align_offset(4), 0);
         assert!(device_es_mem.len() >= mem::size_of::<VirtqueueEventSuppress>());
-        let device = unsafe { &mut *(device_es_mem.as_mut_ptr() as *mut VirtqueueEventSuppress) };
+        // SAFETY: Safe because we just checked the size and alignment
+        let device = unsafe { &mut *(device_es_ptr as *mut VirtqueueEventSuppress) };
 
         Ok(VirtqueuePacked {
             desc,
