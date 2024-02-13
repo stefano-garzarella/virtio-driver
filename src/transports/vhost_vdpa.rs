@@ -21,7 +21,7 @@ use vhost_vdpa_kernel::VhostVdpaKernel;
 use virtio_bindings::virtio_config::*;
 
 #[derive(Debug)]
-pub struct VhostVdpaError(std::io::Error);
+pub struct VhostVdpaError(#[allow(dead_code)] std::io::Error);
 
 impl<E: 'static + std::error::Error + Send + Sync> From<E> for VhostVdpaError {
     fn from(e: E) -> Self {
