@@ -7,13 +7,14 @@ use crate::virtqueue::{Virtqueue, VirtqueueLayout};
 use crate::{
     ByteValued, EventFd, EventfdFlags, Iova, IovaTranslator, QueueNotifier, VirtioTransport,
 };
+use anyhow::Error;
 use front_end::{VhostUserFrontEnd, VhostUserMemoryRegionInfo};
 use memmap2::MmapMut;
 use rustix::fs::{memfd_create, MemfdFlags};
 use rustix::io::Errno;
 use std::convert::{TryFrom, TryInto};
 use std::fs::File;
-use std::io::{Error, ErrorKind};
+use std::io::{self, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -23,10 +24,10 @@ use vhost_user_protocol::{
 };
 
 #[derive(Debug)]
-pub struct VhostUserError(Error);
+pub struct VhostUserError(io::Error);
 
-impl From<Error> for VhostUserError {
-    fn from(e: Error) -> Self {
+impl From<io::Error> for VhostUserError {
+    fn from(e: io::Error) -> Self {
         VhostUserError(e)
     }
 }
@@ -64,7 +65,7 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
 
         let mut features = vhost.get_features()?;
         if features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() == 0 {
-            return Err(VhostUserError(Error::new(
+            return Err(VhostUserError(io::Error::new(
                 ErrorKind::Other,
                 "Backend doesn't support PROTOCOL_FEATURES",
             )));
@@ -79,7 +80,7 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
 
         let mut vhost_features = vhost.get_protocol_features()?;
         if !vhost_features.contains(required_vhost_features) {
-            return Err(VhostUserError(Error::new(
+            return Err(VhostUserError(io::Error::new(
                 ErrorKind::Other,
                 "Backend doesn't support required protocol features",
             )));
@@ -94,7 +95,7 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
                 vhost
                     .get_queue_num()?
                     .try_into()
-                    .map_err(|e| Error::new(ErrorKind::InvalidInput, e))?,
+                    .map_err(|e| io::Error::new(ErrorKind::InvalidInput, e))?,
             )
         } else {
             None
@@ -139,7 +140,7 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
     /// # Result::<(), Box<dyn std::error::Error>>::Ok(())
     /// ```
     pub fn new(path: &str, virtio_features: u64) -> Result<Self, Error> {
-        Self::connect(path, virtio_features).map_err(|e| e.0)
+        Ok(Self::connect(path, virtio_features).map_err(|e| e.0)?)
     }
 
     fn setup_queue(&mut self, i: usize, q: &Virtqueue<R>) -> Result<(), Error> {
@@ -175,10 +176,9 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
 
     fn alloc_queue_mem(&mut self, layout: &VirtqueueLayout) -> Result<&mut [u8], Error> {
         if self.mmap.is_some() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Memory is already allocated",
-            ));
+            return Err(
+                io::Error::new(ErrorKind::InvalidInput, "Memory is already allocated").into(),
+            );
         }
 
         // TODO This assumes that all virtqueues have the same queue_size
@@ -186,7 +186,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
             layout
                 .num_queues
                 .checked_mul(layout.end_offset)
-                .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Queue is too large"))?
+                .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "Queue is too large"))?
                 as u64,
         )?;
 
@@ -211,7 +211,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
         fd_offset: i64,
     ) -> Result<Iova, Error> {
         let mmap_offset = u64::try_from(fd_offset)
-            .map_err(|_| Error::new(ErrorKind::InvalidInput, "Invalid fd_offset"))?;
+            .map_err(|_| io::Error::new(ErrorKind::InvalidInput, "Invalid fd_offset"))?;
 
         let region = VhostUserMemoryRegionInfo {
             mr: VhostUserMemoryRegion {
@@ -225,7 +225,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
 
         self.vhost
             .add_mem_region(&region)
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
         self.mem_table.push(region);
         Ok(Iova(addr as u64))
@@ -236,15 +236,12 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
             if region.mr.user_addr == addr as u64 && region.mr.size == len as u64 {
                 self.vhost
                     .remove_mem_region(region)
-                    .map_err(|e| Error::new(ErrorKind::Other, e))?;
+                    .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
                 self.mem_table.swap_remove(i);
                 return Ok(());
             }
         }
-        Err(Error::new(
-            ErrorKind::InvalidInput,
-            "Memory region not found",
-        ))
+        Err(io::Error::new(ErrorKind::InvalidInput, "Memory region not found").into())
     }
 
     fn iova_translator(&self) -> Box<dyn IovaTranslator> {
@@ -273,7 +270,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
                 self.eventfd_kick.clear();
                 self.eventfd_call.clear();
 
-                Error::new(ErrorKind::Other, e)
+                io::Error::new(ErrorKind::Other, e)
             })?;
         }
         Ok(())
@@ -288,7 +285,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostUser<C, R> {
         let mut buf = vec![0u8; cfg_size];
         self.vhost
             .get_config(0, 0, &mut buf)
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
         Ok(*C::from_slice(&buf).unwrap())
     }
@@ -309,6 +306,6 @@ struct VhostUserNotifier {
 
 impl QueueNotifier for VhostUserNotifier {
     fn notify(&self) -> Result<(), Error> {
-        self.eventfd.write(1)
+        Ok(self.eventfd.write(1)?)
     }
 }

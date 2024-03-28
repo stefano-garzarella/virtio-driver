@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: (MIT OR Apache-2.0)
 
-use std::io::Error;
-use std::os::unix::io::RawFd;
+use crate::lib::{Box, RawFd};
+
+#[cfg(feature = "std")]
 use std::sync::Arc;
+
+use anyhow::Error;
 
 #[cfg(feature = "pci")]
 mod pci;
@@ -19,6 +22,7 @@ pub use vhost_user::VhostUser;
 pub use vhost_vdpa::VhostVdpa;
 
 use crate::util::bytevalued::ByteValued;
+#[cfg(feature = "std")]
 use crate::util::eventfd::EventFd;
 use crate::util::iova::Iova;
 use crate::virtqueue::{Virtqueue, VirtqueueLayout};
@@ -93,6 +97,7 @@ pub trait VirtioTransport<C: ByteValued, R: Copy>: Send + Sync {
     /// queue.
     fn get_submission_notifier(&self, queue_idx: usize) -> Box<dyn QueueNotifier>;
 
+    #[cfg(feature = "std")]
     /// Returns an [`EventFd`] that can be read to be notified of request completions in the queue.
     fn get_completion_fd(&self, queue_idx: usize) -> Arc<EventFd>;
 }

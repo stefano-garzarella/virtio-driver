@@ -114,10 +114,10 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target x86_64-unknown-none --no-default-features --features=alloc,all_transports
+          args: --release --target x86_64-unknown-none --no-default-features --features=alloc
 
       - name: Clippy
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --target x86_64-unknown-none --no-default-features --features=alloc,all_transports -- -D warnings
+          args: --target x86_64-unknown-none --no-default-features --features=alloc -- -D warnings

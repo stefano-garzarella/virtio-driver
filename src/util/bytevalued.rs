@@ -4,9 +4,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE.crosvm file.
 
-use std::io;
-use std::mem::{size_of, MaybeUninit};
-use std::slice::{from_raw_parts, from_raw_parts_mut};
+use crate::lib::{
+    mem::size_of,
+    slice::{from_raw_parts, from_raw_parts_mut},
+};
 
 /// Types for which it is safe to initialize from raw data.
 ///
@@ -75,9 +76,10 @@ pub unsafe trait ByteValued: Copy + Send + Sync {
     }
 
     /// Creates an instance of `Self` by copying raw data from an io::Read stream.
-    fn from_reader<R: io::Read>(mut read: R) -> io::Result<Self> {
+    #[cfg(feature = "std")]
+    fn from_reader<R: std::io::Read>(mut read: R) -> std::io::Result<Self> {
         // Allocate on the stack via `MaybeUninit` to ensure proper alignment.
-        let mut out = MaybeUninit::zeroed();
+        let mut out = std::mem::MaybeUninit::zeroed();
 
         // Safe because the pointer is valid and points to `size_of::<Self>()` bytes of zeroes,
         // which is a properly initialized value for `u8`.

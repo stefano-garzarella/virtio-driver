@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: (MIT OR Apache-2.0)
+use crate::lib::{
+    atomic::{fence, Ordering},
+    mem,
+    num::Wrapping,
+    slice::from_raw_parts_mut,
+    vec, Vec,
+};
 use crate::virtqueue::{VirtqueueDescriptorFlags, VirtqueueFormat};
 use crate::{Le16, Le32, Le64};
+use anyhow::Error;
 use bitflags::bitflags;
-use std::io::{Error, ErrorKind};
-use std::mem;
-use std::num::Wrapping;
-use std::sync::atomic::{fence, Ordering};
 
 /// This is `struct pvirtq_desc` from the VIRTIO 1.2 specification (see 2.8.13).
 #[repr(C)]
@@ -166,10 +170,7 @@ impl<'a> VirtqueuePacked<'a> {
         assert!(desc_mem.len() >= queue_size as usize * mem::size_of::<VirtqueueDescriptor>());
         // SAFETY: Safe because we just checked the size and alignment
         let desc: &mut [VirtqueueDescriptor] = unsafe {
-            std::slice::from_raw_parts_mut(
-                desc_ptr as *mut VirtqueueDescriptor,
-                queue_size as usize,
-            )
+            from_raw_parts_mut(desc_ptr as *mut VirtqueueDescriptor, queue_size as usize)
         };
 
         let driver_es_ptr = driver_es_mem.as_mut_ptr();
@@ -250,7 +251,7 @@ impl<'a> VirtqueueFormat for VirtqueuePacked<'a> {
         flags: VirtqueueDescriptorFlags,
     ) -> Result<u16, Error> {
         if self.queue_avail == 0 {
-            return Err(Error::new(ErrorKind::Other, "Not enough free descriptors"));
+            return Err(Error::msg("Not enough free descriptors"));
         }
 
         let index = self.avail.next_index;

@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: (MIT OR Apache-2.0)
+use crate::lib::{
+    atomic::{fence, AtomicU16, Ordering},
+    marker::PhantomData,
+    mem,
+    num::Wrapping,
+    ptr::slice_from_raw_parts_mut,
+    slice::from_raw_parts_mut,
+};
 use crate::virtqueue::{VirtqueueDescriptorFlags, VirtqueueFormat};
 use crate::{Le16, Le32, Le64};
-use std::io::{Error, ErrorKind};
-use std::marker::PhantomData;
-use std::mem;
-use std::num::Wrapping;
-use std::sync::atomic::{fence, AtomicU16, Ordering};
+use anyhow::Error;
 
 const NO_FREE_DESC: u16 = 0xffff;
 
@@ -58,7 +62,7 @@ impl<'a, T: Clone> VirtqueueRing<'a, T> {
 
         // VirtqueueRingData is a DST because of the unsized `ring` field. Construct a fat
         // pointer to it by casting a slice pointer.
-        let slice_ptr = std::ptr::slice_from_raw_parts_mut(mem.as_mut_ptr(), queue_size);
+        let slice_ptr = slice_from_raw_parts_mut(mem.as_mut_ptr(), queue_size);
         let ptr = slice_ptr as *mut VirtqueueRingData<T>;
         let event =
             unsafe { mem.as_mut_ptr().add(4 + queue_size * mem::size_of::<T>()) as *mut AtomicU16 };
@@ -161,7 +165,7 @@ impl<'a> VirtqueueSplit<'a> {
         let used = VirtqueueRing::new(used_mem, queue_size as usize);
 
         let desc: &mut [VirtqueueDescriptor] = unsafe {
-            std::slice::from_raw_parts_mut(
+            from_raw_parts_mut(
                 desc_mem.as_mut_ptr() as *mut VirtqueueDescriptor,
                 queue_size as usize,
             )
@@ -228,7 +232,7 @@ impl<'a> VirtqueueFormat for VirtqueueSplit<'a> {
     ) -> Result<u16, Error> {
         let idx = self.first_free_desc;
         if idx == NO_FREE_DESC {
-            return Err(Error::new(ErrorKind::Other, "Not enough free descriptors"));
+            return Err(Error::msg("Not enough free descriptors"));
         }
 
         let next_free_desc = self.desc[idx as usize].next;

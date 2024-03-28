@@ -5,13 +5,12 @@
 mod packed;
 mod split;
 
+use crate::lib::{iovec, mem, Box};
 use crate::{Iova, IovaTranslator, Le16, VirtioFeatureFlags};
+use anyhow::Error;
 use bitflags::bitflags;
-use libc::iovec;
 use packed::VirtqueuePacked;
 use split::VirtqueueSplit;
-use std::io::{Error, ErrorKind};
-use std::mem;
 
 bitflags! {
     struct VirtqueueDescriptorFlags: u16 {
@@ -60,7 +59,7 @@ impl VirtqueueLayout {
 
             // Check queue size requirements (see 2.6 in the VIRTIO 1.1 spec)
             if !queue_size.is_power_of_two() || queue_size > 32768 {
-                return Err(Error::new(ErrorKind::InvalidInput, "Invalid queue size"));
+                return Err(Error::msg("Invalid queue size"));
             }
 
             // The used ring requires an alignment of 4 (see 2.6 in the VIRTIO 1.1 spec)
@@ -194,8 +193,7 @@ impl<'a, R: Copy> Virtqueue<'a, R> {
         let event_idx_enabled = features.contains(VirtioFeatureFlags::RING_EVENT_IDX);
         let (format, req_mem) = if features.contains(VirtioFeatureFlags::RING_PACKED) {
             let mem = buf.get_mut(0..layout.end_offset).ok_or_else(|| {
-                Error::new(
-                    ErrorKind::InvalidInput,
+                Error::msg(
                     "Incorrectly sized queue bu
 fer",
                 )
@@ -215,9 +213,9 @@ fer",
 
             (format, req_mem)
         } else {
-            let mem = buf.get_mut(0..layout.end_offset).ok_or_else(|| {
-                Error::new(ErrorKind::InvalidInput, "Incorrectly sized queue buffer")
-            })?;
+            let mem = buf
+                .get_mut(0..layout.end_offset)
+                .ok_or_else(|| Error::msg("Incorrectly sized queue buffer"))?;
 
             let (mem, req_mem) = mem.split_at_mut(layout.req_offset);
             let (mem, used_mem) = mem.split_at_mut(layout.device_area_offset);
@@ -236,10 +234,7 @@ fer",
 
         let req = req_mem.as_mut_ptr() as *mut R;
         if req.align_offset(mem::align_of::<R>()) != 0 {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Insufficient memory alignment",
-            ));
+            return Err(Error::msg("Insufficient memory alignment"));
         }
 
         Ok(Virtqueue {
@@ -291,7 +286,7 @@ fer",
     {
         let chain_id = match self.format.avail_start_chain() {
             None => {
-                return Err(Error::new(ErrorKind::Other, "Not enough free descriptors"));
+                return Err(Error::msg("Not enough free descriptors"));
             }
             Some(idx) => idx,
         };

@@ -32,7 +32,7 @@
 //!   assert_ne!(b_trans, l_trans);
 //! ```
 
-use std::mem::{align_of, size_of};
+use crate::lib::mem::{align_of, size_of};
 
 // Copy only const_assert from
 // https://github.com/nvzqz/static-assertions-rs/blob/v1.1.0/src/const_assert.rs

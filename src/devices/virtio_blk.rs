@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: (MIT OR Apache-2.0)
 
+use crate::lib::{
+    c_void, iovec, iter, mem, slice::from_raw_parts, slice::from_raw_parts_mut, Box, Vec, EIO,
+    ENOTSUP, EPROTO,
+};
 use crate::virtqueue::{Virtqueue, VirtqueueIter, VirtqueueLayout};
 use crate::{ByteValued, Completion, Le16, Le32, Le64, VirtioFeatureFlags, VirtioTransport};
+use anyhow::Error;
 use bitflags::bitflags;
-use libc::{c_void, iovec, EIO, ENOTSUP, EPROTO};
-use std::convert::TryFrom;
-use std::io::{Error, ErrorKind};
-use std::iter;
-use std::mem;
 
 bitflags! {
     pub struct VirtioBlkFeatureFlags: u64 {
@@ -63,7 +63,7 @@ fn to_lba(offset: u64) -> Result<u64, Error> {
     let block_size = 512;
 
     if offset & (block_size - 1) != 0 {
-        return Err(Error::new(ErrorKind::InvalidInput, "Unaligned request"));
+        return Err(Error::msg("Unaligned request"));
     }
 
     Ok(offset / block_size)
@@ -105,8 +105,7 @@ bitflags! {
 impl DiscardWriteZeroesData {
     fn new(offset: u64, len: u64, unmap: bool) -> Result<Self, Error> {
         let start = to_lba(offset)?;
-        let num_sectors = u32::try_from(to_lba(len)?)
-            .map_err(|_e| Error::new(ErrorKind::InvalidInput, "Discard length too large"))?;
+        let num_sectors = u32::try_from(to_lba(len)?).map_err(Error::msg)?;
         let flags = if unmap {
             DiscardWriteZeroesFlags::UNMAP.bits()
         } else {
@@ -194,7 +193,7 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```ignore
 /// # use virtio_driver::{
 /// #     VhostUser, VirtioBlkQueue, VirtioBlkTransport, VirtioFeatureFlags, VirtioTransport
 /// # };
@@ -256,10 +255,7 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
         queue_size: u16,
     ) -> Result<Vec<Self>, Error> {
         if virtio_blk_max_queues(transport)? < num_queues {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Too many queues requested",
-            ));
+            return Err(Error::msg("Too many queues requested"));
         }
 
         let features = VirtioFeatureFlags::from_bits_truncate(transport.get_features());
@@ -279,7 +275,7 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
                 .enumerate()
                 .map(|(i, iova_translator)| {
                     let mem_queue = unsafe {
-                        std::slice::from_raw_parts_mut(
+                        from_raw_parts_mut(
                             &mut mem[i * layout.end_offset] as *mut u8,
                             layout.end_offset,
                         )
@@ -375,7 +371,7 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
         iovcnt: usize,
         context: C,
     ) -> Result<(), Error> {
-        let iov = unsafe { std::slice::from_raw_parts(iovec, iovcnt) };
+        let iov = unsafe { from_raw_parts(iovec, iovcnt) };
         self.queue_request(VirtioBlkReqType::Read, offset, iov, context)
     }
 
@@ -426,7 +422,7 @@ impl<'a, C> VirtioBlkQueue<'a, C> {
         iovcnt: usize,
         context: C,
     ) -> Result<(), Error> {
-        let iov = unsafe { std::slice::from_raw_parts(iovec, iovcnt) };
+        let iov = unsafe { from_raw_parts(iovec, iovcnt) };
         self.queue_request(VirtioBlkReqType::Write, offset, iov, context)
     }
 
