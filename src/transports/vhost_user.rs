@@ -134,8 +134,8 @@ impl<C: ByteValued, R: Copy> VhostUser<C, R> {
     /// use std::sync::{Arc, RwLock};
     ///
     /// let mut vhost = VhostUser::new("/tmp/vhost.sock", VirtioFeatureFlags::VERSION_1.bits())?;
-    /// let mut vhost = Arc::new(RwLock::new(Box::new(vhost) as Box<VirtioBlkTransport>));
-    /// let mut queues = VirtioBlkQueue::<()>::setup_queues(&vhost, 1, 128);
+    /// let mut transport = Box::new(vhost) as Box<VirtioBlkTransport>;
+    /// let mut queues = VirtioBlkQueue::<()>::setup_queues(&mut *transport, 1, 128);
     /// # Result::<(), Box<dyn std::error::Error>>::Ok(())
     /// ```
     pub fn new(path: &str, virtio_features: u64) -> Result<Self, Error> {

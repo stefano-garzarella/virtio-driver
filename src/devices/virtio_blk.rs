@@ -206,23 +206,23 @@ pub type VirtioBlkTransport = dyn VirtioTransport<VirtioBlkConfig, VirtioBlkReqB
 ///
 /// // Connect to the vhost-user socket and create the queues
 /// let mut vhost = VhostUser::new("/tmp/vhost.sock", VirtioFeatureFlags::VERSION_1.bits())?;
-/// let mut vhost = Arc::new(RwLock::new(Box::new(vhost) as Box<VirtioBlkTransport>));
-/// let mut queues = VirtioBlkQueue::<&'static str>::setup_queues(&vhost, 1, 128)?;
+/// let mut transport = Box::new(vhost) as Box<VirtioBlkTransport>;
+/// let mut queues = VirtioBlkQueue::<&'static str>::setup_queues(&mut *transport, 1, 128)?;
 ///
 /// // Create shared memory that is visible for the device
 /// let mem_file: File = memfd_create("guest-ram", MemfdFlags::empty())?.into();
 /// mem_file.set_len(512)?;
 /// let mut mem = unsafe { memmap2::MmapMut::map_mut(&mem_file) }?;
-/// vhost.write().unwrap().map_mem_region(mem.as_ptr() as usize, 512, mem_file.as_raw_fd(), 0)?;
+/// transport.map_mem_region(mem.as_ptr() as usize, 512, mem_file.as_raw_fd(), 0)?;
 ///
 /// // Submit a request
 /// queues[0].read(0, &mut mem, "my-request-context")?;
-/// vhost.read().unwrap().get_submission_notifier(0).notify()?;
+/// transport.get_submission_notifier(0).notify()?;
 ///
 /// // Wait for its completion
 /// let mut done = false;
 /// while !done {
-///     let ret = vhost.read().unwrap().get_completion_fd(0).read();
+///     let ret = transport.get_completion_fd(0).read();
 ///     if ret.is_err() {
 ///         continue;
 ///     }
