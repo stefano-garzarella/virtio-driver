@@ -10,16 +10,20 @@ keywords = ["virtio", "driver", "user-space"]
 categories = ["hardware-support", "virtualization"]
 
 [features]
-default = []
+default = ["std"]
+alloc = ["libc"]
+std = ["anyhow/std", "libc/std", "rustix"]
+
 all_transports = ["pci", "vhost-user", "vhost-vdpa"]
 pci = ["pci-driver"]
 vhost-user = ["memmap2", "rustix/fs"]
 vhost-vdpa = ["memmap2", "rustix/fs", "virtio-bindings"]
 
 [dependencies]
+anyhow = { version = "1.0", default-features = false }
 bitflags = "1.2"
-libc = "0.2"
-rustix = { version = "0.37" }
+libc = { version = "0.2", default-features = false, optional = true }
+rustix = { version = "0.37", optional = true }
 memmap2 = { version = "<0.6", optional = true }
 pci-driver = { version = "0.1.2", default-features = false, optional = true }
 virtio-bindings = { version = "0.2", optional = true }

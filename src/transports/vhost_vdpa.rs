@@ -8,10 +8,11 @@ use crate::{
     ByteValued, EventFd, EventfdFlags, Iova, IovaSpace, IovaTranslator, QueueNotifier,
     VirtioFeatureFlags, VirtioTransport,
 };
+use anyhow::Error;
 use memmap2::MmapMut;
 use rustix::fs::{memfd_create, MemfdFlags};
 use std::fs::File;
-use std::io::{Error, ErrorKind};
+use std::io::{self, ErrorKind};
 use std::marker::PhantomData;
 use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -25,7 +26,7 @@ pub struct VhostVdpaError(#[allow(dead_code)] std::io::Error);
 
 impl<E: 'static + std::error::Error + Send + Sync> From<E> for VhostVdpaError {
     fn from(e: E) -> Self {
-        VhostVdpaError(Error::new(ErrorKind::Other, e))
+        VhostVdpaError(io::Error::new(ErrorKind::Other, e))
     }
 }
 
@@ -127,19 +128,23 @@ impl<C: ByteValued, R: Copy> VhostVdpa<C, R> {
 
         let Iova(desc_user_addr) = iova_space
             .translate(q.desc_table_ptr() as usize, q_layout.driver_area_offset)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Descriptor table is not mapped"))?;
+            .ok_or_else(|| {
+                io::Error::new(ErrorKind::InvalidInput, "Descriptor table is not mapped")
+            })?;
         let Iova(used_user_addr) = iova_space
             .translate(
                 q.device_area_ptr() as usize,
                 q_layout.req_offset - q_layout.device_area_offset,
             )
-            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Used ring is not mapped"))?;
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "Used ring is not mapped"))?;
         let Iova(avail_user_addr) = iova_space
             .translate(
                 q.driver_area_ptr() as usize,
                 q_layout.device_area_offset - q_layout.driver_area_offset,
             )
-            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Available ring is not mapped"))?;
+            .ok_or_else(|| {
+                io::Error::new(ErrorKind::InvalidInput, "Available ring is not mapped")
+            })?;
 
         vdpa.set_vring_addr(queue_idx, desc_user_addr, used_user_addr, avail_user_addr)?;
 
@@ -171,10 +176,9 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         // memory through a memory mapped anonymous file.
 
         if self.mmap.is_some() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Memory is already allocated",
-            ));
+            return Err(
+                io::Error::new(ErrorKind::InvalidInput, "Memory is already allocated").into(),
+            );
         }
 
         let alignment = self.mem_region_alignment();
@@ -182,7 +186,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         let vq_mem_size = layout
             .num_queues
             .checked_mul(layout.end_offset)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "Queue is too large"))?;
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "Queue is too large"))?;
         let vq_mem_size = ((vq_mem_size + alignment - 1) / alignment) * alignment;
 
         // TODO This assumes that all virtqueues have the same queue_size
@@ -223,7 +227,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
             Ok(()) => Ok(iova),
             Err(e) => {
                 iova_space.free(addr, len);
-                Err(e)
+                Err(e.into())
             }
         }
     }
@@ -232,7 +236,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
         let mut iova_space = self.iova_space.write().unwrap();
 
         let Iova(iova) = iova_space.translate(addr, len).ok_or_else(|| {
-            Error::new(
+            io::Error::new(
                 ErrorKind::InvalidInput,
                 format!(
                     "Address range [{:#x}, {:#x}) is not mapped",
@@ -244,7 +248,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
 
         self.vdpa
             .dma_unmap(iova, len as u64)
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
         iova_space.free(addr, len);
 
@@ -264,10 +268,11 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
                     .unwrap()
                     .translate(addr, len)
                     .ok_or_else(|| {
-                        Error::new(
+                        io::Error::new(
                             ErrorKind::InvalidInput,
                             format!("Trying to translate unmapped address {} into an IOVA", addr),
                         )
+                        .into()
                     })
             }
         }
@@ -284,10 +289,10 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
             self.eventfd_call
                 .push(Arc::new(EventFd::new(EventfdFlags::CLOEXEC).unwrap()));
             self.setup_queue(i, q)
-                .map_err(|e| Error::new(ErrorKind::Other, e))?;
+                .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
         }
 
-        self.vdpa.add_status(VIRTIO_CONFIG_S_DRIVER_OK as u8)
+        Ok(self.vdpa.add_status(VIRTIO_CONFIG_S_DRIVER_OK as u8)?)
     }
 
     fn get_features(&self) -> u64 {
@@ -300,7 +305,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for VhostVdpa<C, R> {
 
         self.vdpa
             .get_config(0, &mut buf)
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
         Ok(*C::from_slice(&buf).unwrap())
     }
@@ -321,6 +326,6 @@ struct VhostVdpaNotifier {
 
 impl QueueNotifier for VhostVdpaNotifier {
     fn notify(&self) -> Result<(), Error> {
-        self.eventfd.write(1)
+        Ok(self.eventfd.write(1)?)
     }
 }

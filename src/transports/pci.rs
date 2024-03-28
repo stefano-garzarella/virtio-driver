@@ -13,6 +13,7 @@ use crate::{
     ByteValued, EventFd, EventfdFlags, Iova, IovaSpace, IovaTranslator, QueueNotifier,
     VirtioFeatureFlags, VirtioTransport,
 };
+use anyhow::Error;
 use pci_driver::config::caps::{CapabilityHeader, VendorSpecificCapability};
 use pci_driver::device::PciDevice;
 use pci_driver::regions::structured::{
@@ -561,12 +562,11 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
         self.device.iommu().alignment()
     }
 
-    fn alloc_queue_mem(&mut self, layout: &VirtqueueLayout) -> io::Result<&mut [u8]> {
+    fn alloc_queue_mem(&mut self, layout: &VirtqueueLayout) -> Result<&mut [u8], Error> {
         if self.queue_memory.is_some() {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                "Memory is already allocated",
-            ));
+            return Err(
+                io::Error::new(ErrorKind::InvalidInput, "Memory is already allocated").into(),
+            );
         }
 
         let alignment = self.mem_region_alignment();
@@ -601,7 +601,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
         len: usize,
         _fd: RawFd,
         _fd_offset: i64,
-    ) -> io::Result<Iova> {
+    ) -> Result<Iova, Error> {
         let mut iova_space = self.iova_space.write().unwrap();
 
         let iova = iova_space.allocate(addr, len)?;
@@ -616,12 +616,12 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
             Ok(()) => Ok(iova),
             Err(e) => {
                 iova_space.free(addr, len);
-                Err(e)
+                Err(e.into())
             }
         }
     }
 
-    fn unmap_mem_region(&mut self, addr: usize, len: usize) -> io::Result<()> {
+    fn unmap_mem_region(&mut self, addr: usize, len: usize) -> Result<(), Error> {
         let mut iova_space = self.iova_space.write().unwrap();
 
         let Iova(iova) = iova_space.translate(addr, len).ok_or_else(|| {
@@ -648,7 +648,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
         }
 
         impl IovaTranslator for PciIovaTranslator {
-            fn translate_addr(&self, addr: usize, len: usize) -> io::Result<Iova> {
+            fn translate_addr(&self, addr: usize, len: usize) -> Result<Iova, Error> {
                 self.iova_space
                     .read()
                     .unwrap()
@@ -658,6 +658,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
                             ErrorKind::InvalidInput,
                             format!("Trying to translate unmapped address {} into an IOVA", addr),
                         )
+                        .into()
                     })
             }
         }
@@ -667,7 +668,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
         })
     }
 
-    fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> io::Result<()> {
+    fn setup_queues(&mut self, queues: &[Virtqueue<R>]) -> Result<(), Error> {
         // TODO: Assuming here that the current method is never called twice. We should really
         // somehow use the type system to enforce this.
 
@@ -679,7 +680,8 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
                     self.max_queues,
                     queues.len()
                 ),
-            ));
+            )
+            .into());
         }
 
         let max_vectors = self.device.interrupts().msi_x().max();
@@ -691,7 +693,8 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
                     max_vectors,
                     queues.len()
                 ),
-            ));
+            )
+            .into());
         }
 
         let result = self.setup_queues_inner(queues);
@@ -701,14 +704,14 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
             let _ = common_cfg.device_status().failed().write(true);
         }
 
-        result
+        Ok(result?)
     }
 
     fn get_features(&self) -> u64 {
         self.negotiated_features
     }
 
-    fn get_config(&self) -> io::Result<C> {
+    fn get_config(&self) -> Result<C, Error> {
         let region = self.device_cfg_region.as_ref().ok_or_else(|| {
             io::Error::new(
                 ErrorKind::Other,
@@ -722,7 +725,8 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
             return Err(io::Error::new(
                 ErrorKind::Other,
                 "Not enough bytes for the given config type",
-            ));
+            )
+            .into());
         }
 
         let mem = unsafe { alloc::alloc(layout) };
@@ -740,7 +744,7 @@ impl<C: ByteValued, R: Copy> VirtioTransport<C, R> for Pci<C, R> {
 
         unsafe { alloc::dealloc(mem, layout) };
 
-        result
+        Ok(result?)
     }
 
     fn get_submission_notifier(&self, queue_idx: usize) -> Box<dyn QueueNotifier> {
@@ -764,9 +768,9 @@ struct PciNotifier {
 }
 
 impl QueueNotifier for PciNotifier {
-    fn notify(&self) -> io::Result<()> {
+    fn notify(&self) -> Result<(), Error> {
         // TODO: This breaks spec if called before DRIVER_OK is set. Really should make the type
         // system prevent this kind of thing.
-        self.region.write_le_u16(self.offset, self.queue_idx)
+        Ok(self.region.write_le_u16(self.offset, self.queue_idx)?)
     }
 }

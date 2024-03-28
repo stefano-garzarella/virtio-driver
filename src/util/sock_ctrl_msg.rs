@@ -10,7 +10,7 @@
 //! (e.g. Unix domain sockets).
 
 use std::fs::File;
-use std::io::{IoSlice, IoSliceMut, Result};
+use std::io::{Error, IoSlice, IoSliceMut, Result};
 use std::mem::{size_of, size_of_val};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixDatagram, UnixStream};
@@ -20,8 +20,6 @@ use std::slice;
 use libc::{
     c_long, c_void, cmsghdr, iovec, msghdr, recvmsg, sendmsg, MSG_NOSIGNAL, SCM_RIGHTS, SOL_SOCKET,
 };
-
-use crate::Error;
 
 // Each of the following macros performs the same function as their C counterparts. They are each
 // macros because they are used to size statically allocated arrays.

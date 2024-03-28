@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: (MIT OR Apache-2.0)
 
-use std::collections::BTreeMap;
-use std::io::{self, ErrorKind};
-use std::ops::RangeInclusive;
+use crate::lib::{collections::BTreeMap, format, ops::RangeInclusive, Box};
+use anyhow::Error;
 
 /// Wraps a `u64` representing an IOVA.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -35,22 +34,19 @@ impl IovaSpace {
         }
     }
 
-    pub fn allocate(&mut self, address: usize, size: usize) -> io::Result<Iova> {
+    pub fn allocate(&mut self, address: usize, size: usize) -> Result<Iova, Error> {
         if let Some(mapping) = self.get_mapping_intersecting(address, size) {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                format!("Address {:#x} is already mapped", mapping.base_address),
-            ));
+            return Err(Error::msg(format!(
+                "Address {:#x} is already mapped",
+                mapping.base_address
+            )));
         }
 
         let mapping = self.find_free_iova_range(address, size).ok_or_else(|| {
-            io::Error::new(
-                ErrorKind::Other,
-                format!(
-                    "IOVA space is too small or fragmented to allocate a {}-byte range",
-                    size
-                ),
-            )
+            Error::msg(format!(
+                "IOVA space is too small or fragmented to allocate a {}-byte range",
+                size
+            ))
         })?;
 
         self.mappings_by_address
