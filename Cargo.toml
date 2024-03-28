@@ -11,6 +11,7 @@ categories = ["hardware-support", "virtualization"]
 
 [features]
 default = []
+all_transports = ["pci", "vhost-user", "vhost-vdpa"]
 pci = ["pci-driver"]
 vhost-user = ["memmap2", "rustix/fs"]
 vhost-vdpa = ["memmap2", "rustix/fs", "virtio-bindings"]
